@@ -1,0 +1,16 @@
+--- a/source/ppiclf_solve.f	2026-10-16 14:16:33
++++ b/source/ppiclf_solve.f	2026-10-16 14:16:34
+@@ -1031,9 +1031,12 @@
+          ! evaluate ydot
+          call ppiclf_solve_SetYdot
+ 
++         ! SetYdot may have migrated particles, so recount before the
++         ! update; a stale bound skips particles that just arrived
++         ndum = PPICLF_NPART*PPICLF_LRS
++
+          ! rk3 integrate
+          do i=1,ndum
+-            ndum = PPICLF_NPART*PPICLF_LRS
+             ppiclf_y(i,1) =  ppiclf_rk3coef(1,istage)*ppiclf_y1   (i)
+      >                     + ppiclf_rk3coef(2,istage)*ppiclf_y    (i,1)
+      >                     + ppiclf_rk3coef(3,istage)*ppiclf_ydot (i,1)

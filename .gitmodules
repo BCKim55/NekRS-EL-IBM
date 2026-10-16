@@ -1,0 +1,9 @@
+[submodule "external/nekRS"]
+	path = external/nekRS
+	url = https://github.com/Nek5000/nekRS
+[submodule "external/ppiclF"]
+	path = external/ppiclF
+	url = https://github.com/dpzwick/ppiclF
+[submodule "external/NekIBM"]
+	path = external/NekIBM
+	url = https://github.com/YunchaoYang/NekIBM

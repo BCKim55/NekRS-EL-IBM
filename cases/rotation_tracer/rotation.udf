@@ -1,0 +1,153 @@
+// One-way check of the nekRS <-> ppiclF coupling: tracers in a frozen
+// solid-body rotation about the z axis through the centre of the unit-sphere
+// mesh (ethier.re2).
+//
+// The velocity is linear, so GLL interpolation is exact. ppiclF interpolates
+// the fluid only at the first RK stage, so with this RHS its RK3 collapses to
+// forward Euler: x^n is x^0 rotated by n*atan(w dt) and scaled by
+// (1 + (w dt)^2)^(n/2). Matching that to round-off verifies the coupling
+// (layout, interpolation, particle redistribution); the error against the
+// exact rotation is ppiclF's O(dt) time error and is reported for reference.
+
+#include "ppiclfCoupler.hpp"
+
+static dfloat omega;
+static int nPartGlobal;
+static int ppiclfIOStep;
+static double xc, yc;
+static std::vector<double> xp0, yp0, zp0; // initial positions by particle id, on every rank
+
+#ifdef __okl__
+
+#endif
+
+static void reportError(double time, int tstep)
+{
+  std::vector<double> y, rprop;
+  ppiclf::particles(y, rprop);
+  const int n = ppiclf::numParticles();
+
+  const double wdt = omega * nrs->dt[0];
+  const double angExact = omega * time;
+  const double angEuler = tstep * std::atan(wdt);
+  const double scaleEuler = std::pow(1 + wdt * wdt, 0.5 * tstep);
+
+  double err[2] = {0, 0}; // vs exact rotation, vs ppiclF's discrete solution
+  for (int i = 0; i < n; i++) {
+    const int id = static_cast<int>(rprop[PPICLF_R_JID - 1 + i * PPICLF_LRP]);
+    const double dx0 = xp0[id] - xc;
+    const double dy0 = yp0[id] - yc;
+    const double *yi = &y[i * PPICLF_LRS];
+    const double ez = yi[PPICLF_JZ - 1] - zp0[id];
+    const double ang[2] = {angExact, angEuler};
+    const double scale[2] = {1.0, scaleEuler};
+    for (int k = 0; k < 2; k++) {
+      const double ex = yi[PPICLF_JX - 1] - (xc + scale[k] * (std::cos(ang[k]) * dx0 - std::sin(ang[k]) * dy0));
+      const double ey = yi[PPICLF_JY - 1] - (yc + scale[k] * (std::sin(ang[k]) * dx0 + std::cos(ang[k]) * dy0));
+      err[k] = std::max(err[k], std::sqrt(ex * ex + ey * ey + ez * ez));
+    }
+  }
+
+  int nSum = n;
+  MPI_Allreduce(MPI_IN_PLACE, &nSum, 1, MPI_INT, MPI_SUM, platform->comm.mpiComm());
+  MPI_Allreduce(MPI_IN_PLACE, err, 2, MPI_DOUBLE, MPI_MAX, platform->comm.mpiComm());
+  if (platform->comm.mpiRank() == 0) {
+    printf("tracer: step %d  t %.6e  npart %d/%d  errExact %.3e  errDiscrete %.3e\n",
+           tstep, time, nSum, nPartGlobal, err[0], err[1]);
+  }
+}
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  platform->par->extract("casedata", "omega", omega);
+  platform->par->extract("casedata", "nparticles", nPartGlobal);
+  platform->par->extract("casedata", "ppiclf_iostep", ppiclfIOStep);
+}
+
+void UDF_Setup()
+{
+  auto mesh = nrs->meshV;
+  auto &fluid = nrs->fluid;
+  auto comm = platform->comm.mpiComm();
+
+  std::vector<dfloat> x(mesh->Nlocal), y(mesh->Nlocal), z(mesh->Nlocal);
+  mesh->o_x.copyTo(x.data(), mesh->Nlocal);
+  mesh->o_y.copyTo(y.data(), mesh->Nlocal);
+  mesh->o_z.copyTo(z.data(), mesh->Nlocal);
+
+  double lo[3] = {*std::min_element(x.begin(), x.end()),
+                  *std::min_element(y.begin(), y.end()),
+                  *std::min_element(z.begin(), z.end())};
+  double hi[3] = {*std::max_element(x.begin(), x.end()),
+                  *std::max_element(y.begin(), y.end()),
+                  *std::max_element(z.begin(), z.end())};
+  MPI_Allreduce(MPI_IN_PLACE, lo, 3, MPI_DOUBLE, MPI_MIN, comm);
+  MPI_Allreduce(MPI_IN_PLACE, hi, 3, MPI_DOUBLE, MPI_MAX, comm);
+  xc = 0.5 * (lo[0] + hi[0]);
+  yc = 0.5 * (lo[1] + hi[1]);
+
+  // frozen solid-body rotation (velocity solver = none)
+  std::vector<dfloat> U(mesh->dim * fluid->fieldOffset, 0.0);
+  for (dlong n = 0; n < mesh->Nlocal; n++) {
+    U[n + 0 * fluid->fieldOffset] = -omega * (y[n] - yc);
+    U[n + 1 * fluid->fieldOffset] = omega * (x[n] - xc);
+  }
+  fluid->o_U.copyFrom(U.data(), U.size());
+
+  // tracers on a sunflower spiral in a short cylinder well inside the unit
+  // sphere, leaving room for the outward drift of the Euler-like update
+  const double R = 0.25 * std::min(hi[0] - lo[0], hi[1] - lo[1]);
+  const double zc = 0.5 * (lo[2] + hi[2]);
+  const double goldenAngle = M_PI * (3.0 - std::sqrt(5.0));
+  for (int id = 0; id < nPartGlobal; id++) {
+    const double r = R * std::sqrt((id + 0.5) / nPartGlobal);
+    const double th = id * goldenAngle;
+    const double frac = std::fmod(id * 0.6180339887498949, 1.0);
+    xp0.push_back(xc + r * std::cos(th));
+    yp0.push_back(yc + r * std::sin(th));
+    zp0.push_back(zc + (frac - 0.5) * R);
+  }
+
+  ppiclf::initMPI(comm);
+
+  // all tracers start on rank 0; ppiclF bins them across ranks
+  const int npart = (platform->comm.mpiRank() == 0) ? nPartGlobal : 0;
+  std::vector<double> y0(PPICLF_LRS * npart + 1), rprop0(PPICLF_LRP * npart + 1, 0.0);
+  for (int id = 0; id < npart; id++) {
+    y0[PPICLF_JX - 1 + id * PPICLF_LRS] = xp0[id];
+    y0[PPICLF_JY - 1 + id * PPICLF_LRS] = yp0[id];
+    y0[PPICLF_JZ - 1 + id * PPICLF_LRS] = zp0[id];
+    rprop0[PPICLF_R_JID - 1 + id * PPICLF_LRP] = id;
+  }
+  int imethod = 1; // RK3
+  int ndim = mesh->dim;
+  int iendian = 0;
+  int np = npart;
+  ppiclc_solve_InitParticle(&imethod, &ndim, &iendian, &np, y0.data(), rprop0.data());
+  ppiclf::initOverlapMesh(mesh);
+
+  if (platform->comm.mpiRank() == 0) {
+    printf("tracer: domain [%g,%g]x[%g,%g]x[%g,%g], rotation centre (%g,%g), R %g\n",
+           lo[0], hi[0], lo[1], hi[1], lo[2], hi[2], xc, yc, R);
+  }
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  auto mesh = nrs->meshV;
+  auto &fluid = nrs->fluid;
+
+  if (tstep > 0) {
+    ppiclf::interpField(mesh, PPICLF_R_JUX, fluid->o_U.slice(0 * fluid->fieldOffset, mesh->Nlocal));
+    ppiclf::interpField(mesh, PPICLF_R_JUY, fluid->o_U.slice(1 * fluid->fieldOffset, mesh->Nlocal));
+    ppiclf::interpField(mesh, PPICLF_R_JUZ, fluid->o_U.slice(2 * fluid->fieldOffset, mesh->Nlocal));
+
+    double dt = nrs->dt[0];
+    double t = time;
+    ppiclc_solve_IntegrateParticle(&tstep, &ppiclfIOStep, &dt, &t);
+  }
+
+  if (tstep % 50 == 0 || nrs->lastStep) {
+    reportError(time, tstep);
+  }
+}

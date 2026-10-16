@@ -1,0 +1,21 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 7
+stopAt = numSteps
+# one full revolution: numSteps * dt = 2*pi/omega
+numSteps = 600
+dt = 0.010471975511965976
+timeStepper = tombo2
+checkpointInterval = 0
+
+[FLUID VELOCITY]
+solver = none
+rho = 1.0
+viscosity = 1.0
+
+[CASEDATA]
+omega = 1.0
+nparticles = 1000
+# ppiclF VTU output interval (particle steps)
+ppiclf_iostep = 100

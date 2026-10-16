@@ -1,0 +1,132 @@
+--- a/source/ppiclf_comm.f	2026-10-16 14:18:38
++++ b/source/ppiclf_comm.f	2026-10-16 14:18:39
+@@ -409,76 +409,72 @@
+       integer*4 nkey(2), i, j, k, ie, iee, ii, jj, kk, ndum, nrank,
+      >          nl, nii, njj, nrr, ilow, jlow, klow, nxyz, il,
+      >          ihigh, jhigh, khigh, ierr
+-      real*8 rxval, ryval, rzval
++      real*8 rxval, ryval, rzval, rlo(3), rhi(3), rpad
++      integer*4 ibl(3), ibh(3)
+       logical partl
+       real*8 ppiclf_vlmin, ppiclf_vlmax
+       external ppiclf_vlmin, ppiclf_vlmax
+ 
+-      ! see which bins are in which elements
++      ! Send each element to every bin its bounding box touches. Testing
++      ! only whether a GLL node lies inside a bin misses skewed/curved
++      ! elements that overlap a bin without having a node in it, and
++      ! particles there are then not found. The box is padded like
++      ! findpts' bounding boxes (1%) since the curved element can
++      ! bulge past its nodes.
++      nxyz = PPICLF_LEX*PPICLF_LEY*PPICLF_LEZ
+       ppiclf_neltb = 0
+       do ie=1,ppiclf_nee
+-      do k=1,PPICLF_LEZ
+-      do j=1,PPICLF_LEY
+-      do i=1,PPICLF_LEX
+-         rxval = ppiclf_xm1bs(i,j,k,1,ie)
+-         ryval = ppiclf_xm1bs(i,j,k,2,ie)
+-         rzval = 0.0d0
+-         if(ppiclf_ndim.gt.2) rzval = ppiclf_xm1bs(i,j,k,3,ie)
+-
+-         if (rxval .gt. ppiclf_binb(2)) goto 1233
+-         if (rxval .lt. ppiclf_binb(1)) goto 1233
+-         if (ryval .gt. ppiclf_binb(4)) goto 1233
+-         if (ryval .lt. ppiclf_binb(3)) goto 1233
+-         if (ppiclf_ndim.gt.2 .and. rzval .gt. ppiclf_binb(6)) 
+-     >      goto 1233
+-         if (ppiclf_ndim.gt.2 .and. rzval .lt. ppiclf_binb(5))
+-     >      goto 1233
+-
+-         ii    = floor((rxval-ppiclf_binb(1))/ppiclf_bins_dx(1)) 
+-         jj    = floor((ryval-ppiclf_binb(3))/ppiclf_bins_dx(2)) 
+-         kk    = floor((rzval-ppiclf_binb(5))/ppiclf_bins_dx(3)) 
+-         if (ppiclf_ndim.lt.3) kk = 0
+-          if (ii .eq. ppiclf_n_bins(1)) ii = ppiclf_n_bins(1) - 1
+-          if (jj .eq. ppiclf_n_bins(2)) jj = ppiclf_n_bins(2) - 1
+-          if (kk .eq. ppiclf_n_bins(3)) kk = ppiclf_n_bins(3) - 1
+-          if (ii .eq. -1) ii = 0
+-          if (jj .eq. -1) jj = 0
+-          if (kk .eq. -1) kk = 0
+-         ndum  = ii + ppiclf_n_bins(1)*jj + 
+-     >                ppiclf_n_bins(1)*ppiclf_n_bins(2)*kk
+-         nrank = ndum
++         do i=1,3
++            rlo(i) = 0.0d0
++            rhi(i) = 0.0d0
++         enddo
++         do i=1,ppiclf_ndim
++            rlo(i) = ppiclf_vlmin(ppiclf_xm1bs(1,1,1,i,ie),nxyz)
++            rhi(i) = ppiclf_vlmax(ppiclf_xm1bs(1,1,1,i,ie),nxyz)
++            rpad   = 0.01d0*(rhi(i) - rlo(i))
++            rlo(i) = rlo(i) - rpad
++            rhi(i) = rhi(i) + rpad
++            if (rhi(i) .lt. ppiclf_binb(2*i-1)) goto 1233
++            if (rlo(i) .gt. ppiclf_binb(2*i  )) goto 1233
++         enddo
+ 
+-         if (ii .lt. 0 .or. ii .gt. ppiclf_n_bins(1)-1) goto 1233
+-         if (jj .lt. 0 .or. jj .gt. ppiclf_n_bins(2)-1) goto 1233
+-         if (kk .lt. 0 .or. kk .gt. ppiclf_n_bins(3)-1) goto 1233
++         do i=1,3
++            ibl(i) = 0
++            ibh(i) = 0
++         enddo
++         do i=1,ppiclf_ndim
++            ibl(i) = floor((rlo(i)-ppiclf_binb(2*i-1))
++     >                     /ppiclf_bins_dx(i))
++            ibh(i) = floor((rhi(i)-ppiclf_binb(2*i-1))
++     >                     /ppiclf_bins_dx(i))
++            ibl(i) = min(max(ibl(i),0),ppiclf_n_bins(i)-1)
++            ibh(i) = min(max(ibh(i),0),ppiclf_n_bins(i)-1)
++         enddo
+ 
+-         ppiclf_neltb = ppiclf_neltb + 1
+-         if(ppiclf_neltb .gt. PPICLF_LEE) then
+-           call ppiclf_exittr('Increase PPICLF_LEE$',0.0d0,ppiclf_neltb)
+-         endif
+-
+-         ppiclf_er_map(1,ppiclf_neltb) = ie
+-         ppiclf_er_map(2,ppiclf_neltb) = ppiclf_nid
+-         ppiclf_er_map(3,ppiclf_neltb) = ndum
+-         ppiclf_er_map(4,ppiclf_neltb) = nrank
+-         ppiclf_er_map(5,ppiclf_neltb) = nrank
+-         ppiclf_er_map(6,ppiclf_neltb) = nrank
++         do kk=ibl(3),ibh(3)
++         do jj=ibl(2),ibh(2)
++         do ii=ibl(1),ibh(1)
++            ndum  = ii + ppiclf_n_bins(1)*jj + 
++     >                   ppiclf_n_bins(1)*ppiclf_n_bins(2)*kk
++            nrank = ndum
+ 
+-         if (ppiclf_neltb .gt. 1) then
+-         do il=1,ppiclf_neltb-1
+-            if (ppiclf_er_map(1,il) .eq. ie) then
+-            if (ppiclf_er_map(4,il) .eq. nrank) then
+-               ppiclf_neltb = ppiclf_neltb - 1
+-               goto 1233
++            ppiclf_neltb = ppiclf_neltb + 1
++            if(ppiclf_neltb .gt. PPICLF_LEE) then
++              call ppiclf_exittr('Increase PPICLF_LEE$',0.0d0
++     >                          ,ppiclf_neltb)
+             endif
+-            endif
++
++            ppiclf_er_map(1,ppiclf_neltb) = ie
++            ppiclf_er_map(2,ppiclf_neltb) = ppiclf_nid
++            ppiclf_er_map(3,ppiclf_neltb) = ndum
++            ppiclf_er_map(4,ppiclf_neltb) = nrank
++            ppiclf_er_map(5,ppiclf_neltb) = nrank
++            ppiclf_er_map(6,ppiclf_neltb) = nrank
+          enddo
+-         endif
++         enddo
++         enddo
+  1233 continue
+       enddo
+-      enddo
+-      enddo
+-      enddo
+ 
+       nxyz = PPICLF_LEX*PPICLF_LEY*PPICLF_LEZ
+       do ie=1,ppiclf_neltb
