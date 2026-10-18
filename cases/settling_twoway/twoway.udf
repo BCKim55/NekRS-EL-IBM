@@ -1,11 +1,8 @@
-// Two-way coupled settling of point particles in a fully periodic box.
-//
-// After each fluid step the particles are advanced with the new fluid
-// velocity, their drag reactions are projected onto the GLL points, and the
-// next fluid step adds F_proj / (1 - phi_p) as a momentum source.
+// Two-way coupled settling of EL point particles in a fully periodic box
+// (src/elibm.hpp with no IBM bodies).
 //
 // Checks (z, the gravity direction), each normalised by the gravity impulse
-// sum(m_p) |g| t:
+// sum(m_p) |g| t unless noted:
 //   proj  : int F_proj dV - sum f_p, normalised by |sum f_p| instead
 //           -> projection conservation (Gaussian truncation + quadrature)
 //   fluid : P_f - P_f0 - int_0^t int FU dV dt
@@ -14,108 +11,46 @@
 //           -> global momentum; periodic walls leave gravity on the particles
 //              as the only external force, so this is nonzero only through
 //              1/(1 - phi_p) and the explicit lag between the two updates
+//   div   : RMS of the imposed div u = -(1/phi_f) D phi_f/Dt (qtl = 1), and
+//           of the difference between it and the solved div u
 
 #include <random>
 
-#include "ppiclfCoupler.hpp"
-
-extern "C" void ppiclc_user_SetParams(double *mu, double *rho, double *grav);
+#include "elibm.hpp"
 
 static int nPartGlobal;
 static int reportInterval;
 static int ppiclfIOStep;
+static int qtl;
 static double rhop, dp, gz, filterWidth;
-static double rhof;
 
-static deviceMemory<dfloat> o_FU;     // momentum source for the next fluid step
-static std::vector<double> massLocal; // local GLL mass-matrix weights
-static double intFUz = 0;             // int FU_z dV of the current source
-static double intFprojz = 0;          // int F_proj,z dV of the current projection
-static double sourceImpulse = 0;      // int_0^t int FU_z dV dt
+static std::unique_ptr<elibm::Coupling> coupling;
+static double sourceZ = 0;        // int FU_z dV of the source in use
+static double sourceImpulse = 0;  // int_0^t int FU_z dV dt
 
 #ifdef __okl__
 
 #endif
 
-static double globalSum(double v)
-{
-  MPI_Allreduce(MPI_IN_PLACE, &v, 1, MPI_DOUBLE, MPI_SUM, platform->comm.mpiComm());
-  return v;
-}
-
-static void userf(double time)
-{
-  nrs->fluid->o_explicitTerms().copyFrom(o_FU, nrs->fluid->fieldOffsetSum);
-}
-
-// project the current particle forces and build FU = F_proj / (1 - phi_p)
-static void updateForcing()
-{
-  auto mesh = nrs->meshV;
-  const auto offset = nrs->fluid->fieldOffset;
-
-  ppiclc_solve_Project();
-
-  std::vector<double> phi, f;
-  ppiclf::projectedField(mesh, PPICLF_P_JPHIP, phi);
-
-  std::vector<dfloat> FU(nrs->fluid->fieldOffsetSum, 0.0);
-  const int jf[3] = {PPICLF_P_JFX, PPICLF_P_JFY, PPICLF_P_JFZ};
-  for (int c = 0; c < mesh->dim; c++) {
-    ppiclf::projectedField(mesh, jf[c], f);
-    for (dlong n = 0; n < mesh->Nlocal; n++) {
-      FU[n + c * offset] = f[n] / (1.0 - phi[n]);
-    }
-    if (c == 2) {
-      double sf = 0, sFU = 0;
-      for (dlong n = 0; n < mesh->Nlocal; n++) {
-        sf += massLocal[n] * f[n];
-        sFU += massLocal[n] * FU[n + c * offset];
-      }
-      intFprojz = globalSum(sf);
-      intFUz = globalSum(sFU);
-    }
-  }
-  o_FU.copyFrom(FU);
-}
-
 static void report(double time, int tstep)
 {
-  auto mesh = nrs->meshV;
-  auto &fluid = nrs->fluid;
-
-  std::vector<double> y, rprop;
-  ppiclf::particles(y, rprop);
-  const int n = ppiclf::numParticles();
-
-  double mass = 0, Pp = 0, fz = 0, phiMax = 0;
-  for (int i = 0; i < n; i++) {
-    const double *ri = &rprop[i * PPICLF_LRP];
-    const double m = ri[PPICLF_R_JRHOP - 1] * ri[PPICLF_R_JVOLP - 1];
-    mass += m;
-    Pp += m * y[PPICLF_JVZ - 1 + i * PPICLF_LRS];
-    fz += ri[PPICLF_R_JFZ - 1];
-  }
-  mass = globalSum(mass);
-  Pp = globalSum(Pp);
-  fz = globalSum(fz);
-
-  const double Pf =
-      rhof * platform->linAlg->innerProd(mesh->Nlocal, mesh->o_LMM, fluid->o_U.slice(2 * fluid->fieldOffset, mesh->Nlocal), platform->comm.mpiComm());
-  const double impulse = mass * std::abs(gz) * time;
-
+  const auto tot = coupling->totals();
+  const double impulse = tot.elMass * std::abs(gz) * time;
+  const double fz = tot.elForceOnFluid[2];
   if (platform->comm.mpiRank() == 0) {
     const double inv = impulse > 0 ? 1 / impulse : 0;
     printf("twoway: step %d  t %.4e  Pf %.6e  Pp %.6e  sumf %.6e  "
-           "proj %.3e  fluid %.3e  total %.3e\n",
+           "proj %.3e  fluid %.3e  total %.3e  div %.3e  divErr %.3e\n",
            tstep,
            time,
-           Pf,
-           Pp,
+           tot.fluidMomentum[2],
+           tot.elMomentum[2],
            fz,
-           fz != 0 ? (intFprojz - fz) / std::abs(fz) : 0.0,
-           (Pf - sourceImpulse) * inv,
-           (Pf + Pp - mass * gz * time) * inv);
+           fz != 0 ? (tot.elForceProjected[2] - fz) / std::abs(fz) : 0.0,
+           (tot.fluidMomentum[2] - sourceImpulse) * inv,
+           (tot.fluidMomentum[2] + tot.elMomentum[2] - tot.elMass * gz * time) * inv,
+           tot.divRms,
+           tot.divErrRms);
   }
 }
 
@@ -127,92 +62,50 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
   platform->par->extract("casedata", "gz", gz);
   platform->par->extract("casedata", "filter_width", filterWidth);
   platform->par->extract("casedata", "report_interval", reportInterval);
+  platform->par->extract("casedata", "qtl", qtl);
   platform->par->extract("casedata", "ppiclf_iostep", ppiclfIOStep);
 }
 
 void UDF_Setup()
 {
-  auto mesh = nrs->meshV;
-  auto comm = platform->comm.mpiComm();
+  elibm::Config cfg;
+  platform->options.getArgs("FLUID DENSITY", cfg.rhof);
+  platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+  cfg.grav = {0, 0, gz};
+  cfg.periodic = {true, true, true};
+  cfg.filterWidth = filterWidth;
+  cfg.ioStep = ppiclfIOStep;
+  cfg.qtl = qtl != 0;
 
-  double mu;
-  platform->options.getArgs("FLUID DENSITY", rhof);
-  platform->options.getArgs("FLUID VISCOSITY", mu);
-
-  massLocal.resize(mesh->Nlocal);
-  mesh->o_LMM.copyTo(massLocal.data(), mesh->Nlocal);
-  o_FU.resize(nrs->fluid->fieldOffsetSum);
-  nrs->userSource = &userf;
-
-  std::vector<dfloat> x(mesh->Nlocal), y(mesh->Nlocal), z(mesh->Nlocal);
-  mesh->o_x.copyTo(x.data(), mesh->Nlocal);
-  mesh->o_y.copyTo(y.data(), mesh->Nlocal);
-  mesh->o_z.copyTo(z.data(), mesh->Nlocal);
-  double lo[3] = {*std::min_element(x.begin(), x.end()),
-                  *std::min_element(y.begin(), y.end()),
-                  *std::min_element(z.begin(), z.end())};
-  double hi[3] = {*std::max_element(x.begin(), x.end()),
-                  *std::max_element(y.begin(), y.end()),
-                  *std::max_element(z.begin(), z.end())};
-  MPI_Allreduce(MPI_IN_PLACE, lo, 3, MPI_DOUBLE, MPI_MIN, comm);
-  MPI_Allreduce(MPI_IN_PLACE, hi, 3, MPI_DOUBLE, MPI_MAX, comm);
-
-  ppiclf::initMPI(comm);
-  double grav[3] = {0, 0, gz};
-  ppiclc_user_SetParams(&mu, &rhof, grav);
+  coupling = std::make_unique<elibm::Coupling>(nrs, cfg);
+  const auto lo = coupling->domainLo();
+  const auto hi = coupling->domainHi();
 
   // particles at rest, uniformly random in the box, all created on rank 0
-  const int npart = (platform->comm.mpiRank() == 0) ? nPartGlobal : 0;
-  std::vector<double> y0(PPICLF_LRS * npart + 1, 0.0), rprop0(PPICLF_LRP * npart + 1, 0.0);
-  std::mt19937_64 gen(12345);
-  std::uniform_real_distribution<double> uni(0.0, 1.0);
-  for (int i = 0; i < npart; i++) {
-    double *yi = &y0[i * PPICLF_LRS];
-    double *ri = &rprop0[i * PPICLF_LRP];
-    yi[PPICLF_JX - 1] = lo[0] + uni(gen) * (hi[0] - lo[0]);
-    yi[PPICLF_JY - 1] = lo[1] + uni(gen) * (hi[1] - lo[1]);
-    yi[PPICLF_JZ - 1] = lo[2] + uni(gen) * (hi[2] - lo[2]);
-    ri[PPICLF_R_JRHOP - 1] = rhop;
-    ri[PPICLF_R_JDP - 1] = dp;
-    ri[PPICLF_R_JVOLP - 1] = M_PI / 6.0 * dp * dp * dp;
-    ri[PPICLF_R_JID - 1] = i;
+  if (platform->comm.mpiRank() == 0) {
+    std::mt19937_64 gen(12345);
+    std::uniform_real_distribution<double> uni(0.0, 1.0);
+    for (int i = 0; i < nPartGlobal; i++) {
+      elibm::ElParticle p;
+      for (int k = 0; k < 3; k++) {
+        p.x[k] = lo[k] + uni(gen) * (hi[k] - lo[k]);
+      }
+      p.dp = dp;
+      p.rho = rhop;
+      coupling->addEl(p);
+    }
   }
-  int imethod = 1; // RK3
-  int ndim = mesh->dim;
-  int iendian = 0;
-  int np = npart;
-  ppiclc_solve_InitParticle(&imethod, &ndim, &iendian, &np, y0.data(), rprop0.data());
-
-  double alpha = 1e-4; // Gaussian truncated where it falls to alpha of its peak
-  int iwallm = 0;
-  ppiclc_solve_InitGaussianFilter(&filterWidth, &alpha, &iwallm);
-  ppiclf::initOverlapMesh(mesh);
-  ppiclc_solve_InitPeriodicX(&lo[0], &hi[0]);
-  ppiclc_solve_InitPeriodicY(&lo[1], &hi[1]);
-  ppiclc_solve_InitPeriodicZ(&lo[2], &hi[2]);
-
-  updateForcing();
+  coupling->initialize();
 }
 
 void UDF_ExecuteStep(double time, int tstep)
 {
-  auto mesh = nrs->meshV;
-  auto &fluid = nrs->fluid;
-
   if (tstep > 0) {
     // the source applied during the step that just finished
-    sourceImpulse += nrs->dt[0] * intFUz;
-
-    ppiclf::interpField(mesh, PPICLF_R_JUX, fluid->o_U.slice(0 * fluid->fieldOffset, mesh->Nlocal));
-    ppiclf::interpField(mesh, PPICLF_R_JUY, fluid->o_U.slice(1 * fluid->fieldOffset, mesh->Nlocal));
-    ppiclf::interpField(mesh, PPICLF_R_JUZ, fluid->o_U.slice(2 * fluid->fieldOffset, mesh->Nlocal));
-
-    double dt = nrs->dt[0];
-    double t = time;
-    ppiclc_solve_IntegrateParticle(&tstep, &ppiclfIOStep, &dt, &t);
-
-    updateForcing();
+    sourceImpulse += nrs->dt[0] * sourceZ;
   }
+  coupling->step(time, tstep);
+  sourceZ = coupling->totals().source[2];
 
   if (tstep % reportInterval == 0 || nrs->lastStep) {
     report(time, tstep);

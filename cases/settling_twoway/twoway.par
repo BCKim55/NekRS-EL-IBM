@@ -29,5 +29,7 @@ gz = -1.0
 # Gaussian filter full width at half maximum
 filter_width = 0.15
 report_interval = 20
+# volume-filtered continuity div u = -(1/phi_f) D phi_f/Dt (0: off)
+qtl = 1
 # ppiclF VTU output interval (particle steps)
 ppiclf_iostep = 100

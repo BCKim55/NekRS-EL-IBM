@@ -1,34 +1,87 @@
 # Design notes
 
-## 1. Current coupling (phase A: ppiclF on CPU, host-staged)
+## 1. Coupling (ppiclF on CPU, host-staged)
 
 nekRS owns the fluid on the device; ppiclF owns the particles on the host.
-Per fluid step, in `UDF_ExecuteStep(time, tstep)` (called after the step, so
-fields are at t^{n+1}):
+Two layers:
 
-1. `ppiclf::interpField(mesh, jp, o_field)` — device → host copy of each field
-   to interpolate, handed to `ppiclf_solve_InterpFieldUser`.
-2. `ppiclc_solve_IntegrateParticle` — ppiclF's RK3 over one fluid dt.
-3. Two-way: `ppiclc_solve_Project` re-projects with the final particle state
-   (ppiclF's own last projection is one RK stage stale), `ppiclf::projectedField`
-   reads the force and `phi_p` fields, and `FU = F_proj / (1 - phi_p)` goes to
-   the device. `nrs->userSource` copies it into `fluid->o_explicitTerms()` for
-   the next fluid step.
+- `src/ppiclfCoupler.hpp` — thin helpers: pass the local nekRS mesh as
+  ppiclF's overlap mesh, hand fields over for interpolation, read projected
+  fields and particles. nekRS's element layout (`Nelements` blocks of `Nq^3`,
+  i fastest) equals ppiclF's `(LEX,LEY,LEZ,NEE)`, so nothing is reordered.
+  `PPICLF_LEX` must equal `polynomialOrder+1`; `PPICLF_LEE` must cover the
+  local element count *and* every element ppiclF ships to a rank's bin.
+- `src/elibm.hpp` (`elibm::Coupling`) with the ppiclF user routines
+  `src/ppiclf_user_elibm.f` — the EL + IBM model below. A case only sets array
+  sizes in its `PPICLF_USER.h` and includes `src/PPICLF_ELIBM.h`.
 
-The particle side keeps the force it exerts on the fluid in its own `rprop`
-slots (set in `SetYdot`, read in `MapProjPart`), not in `ydotc`, which ppiclF
-zeroes every stage and which collision forces would also land in.
+### Particles
 
-nekRS's element layout (`Nelements` blocks of `Nq^3`, i fastest) equals
-ppiclF's `(LEX,LEY,LEZ,NEE)`, so the local nekRS mesh is passed directly as
-ppiclF's overlap mesh (`ppiclf::initOverlapMesh`). `PPICLF_LEX` must equal
-`polynomialOrder+1`, and `PPICLF_LEE` must cover the local element count *and*
-every element ppiclF ships to a rank's bin.
+ppiclF carries two kinds of particles (`rprop(JTYPE)`):
 
-Momentum source units: `fluid->o_explicitTerms()` (`FU`) enters `sumMakef`
-as `JW * FU`, i.e. a force per unit volume. For the volume-filtered equations
-the particle feedback is `F_proj / (1 - phi_p)` (as in ppiclF's Nek5000 example,
-which divides by `rho` because Nek5000's `userf` is an acceleration).
+- **EL point particles**: Schiller–Naumann drag on the interpolated fluid
+  velocity, gravity, and soft-sphere contact with other EL particles (ppiclF's
+  binned neighbour search, `InitNeighborBin`) and with IBM bodies (direct loop;
+  bodies are few). The drag reaction goes to the fluid.
+- **IBM surface markers**: Fibonacci points on each sphere, moved rigidly with
+  their body (snapped to the exact rigid position after every step). Each
+  exerts the explicit direct-forcing force of NekIBM (`ibm_f_marker`),
+  `f = rho_f dV (u_body - u)/dt`, on the fluid.
+
+The body state (centre, velocity, angular velocity, rotation matrix) is
+replicated on every rank in C++ and handed to Fortran each step. Bodies follow
+Uhlmann (2005) with the internal fluid taken as rigid:
+`(rho_b - rho_f) V dU/dt = -sum f + F_contact + (rho_b - rho_f) V g` and
+`0.4 (rho_b - rho_f) V R^2 dw/dt = -sum r x f`.
+
+Contact is a linear spring–dashpot along the normal; the dashpot is set from
+the restitution coefficient for an isolated binary impact. The contact time
+`pi sqrt(m_eff / k_n)` usually needs a smaller dt than the fluid, so particles
+can take `substeps` per fluid step (fluid frozen). The EL particle stores the
+contact force it receives from bodies (`rprop(JC*)`); summed over sub-steps it
+is the impulse the bodies receive back.
+
+### Fluid side
+
+After the particle step `ppiclc_solve_Project` re-projects with the final state
+(ppiclF's own last projection is one RK stage stale) onto seven fields:
+EL force, IBM force, `phi_p`. Then
+
+- momentum: `FU = F_EL / (1 - phi_p) + F_IBM`, a force per unit volume
+  (`sumMakef` uses `JW * FU`), through `nrs->userSource`;
+- continuity (`qtl`): `div u = -(1/phi_f) (D phi_f/Dt)`, `phi_f = 1 - phi_p`,
+  with a backward difference in time and `opSEM::strongGrad`, through
+  `nrs->userDivergence`. In a closed or fully periodic domain its volume mean is
+  removed (it must integrate to zero).
+
+IBM markers project with `phi_p = 0`: bodies are resolved, not volume-filtered.
+
+### Time integration of the source
+
+nekRS extrapolates explicit terms to t^{n+1} (EXT2: `2 E^n - E^{n-1}`) and its
+BDF2 integrates them half a step late; together that is second order for the
+smooth EL drag, which is passed through unchanged. For the IBM direct forcing,
+a proportional controller on the marker slip, the extrapolation doubles the
+gain: with gain `G` the slip obeys `z^2 - (1 - 2G) z - G = 0`, unstable at
+`G = 1` (root -1.618). So the IBM part is written as
+`E^n = (F - sum_{s>=1} c_s E^{n-s}) / c_0` with nekRS's current `c_s`
+(`fluid->o_coeffEXT`), which makes the step apply exactly `F`; the slip then
+decays as `(1 - G)^n`, stable for `0 < G < 2`.
+
+### IBM gain and stability
+
+The controller gain is what spreading then interpolating returns at a marker.
+A Gaussian sheet integrates across the surface to `1 / (sqrt(2 pi) sigma)`,
+so the marker volume is (surface share) x `sqrt(2 pi) sigma` (gain 1). Using the
+grid spacing `h` instead, as Uhlmann does for his narrower delta, gives gain
+`h / (sqrt(2 pi) sigma)` = 0.39 here and lingering slip.
+
+The explicit body update adds a second constraint: the fluid shell the markers
+drive, `rho_f A sqrt(2 pi) sigma`, must be lighter than the body's excess mass
+`(rho_b - rho_f) V`, otherwise a change in body velocity is fed back amplified
+each step. For a sphere: `rho_b / rho_f > 1 + 3 sqrt(2 pi) sigma / R`.
+`elibm::Coupling::initialize` aborts below it (the collision demo at
+`rho_b / rho_f = 2` < 2.28 diverged within 30 steps; 4 runs cleanly).
 
 ## 2. ppiclF findings
 
@@ -70,7 +123,48 @@ digits):
   = 0.344`, so drag tends to `m_p (g - a) = 0.344`; the run reaches 0.341 at
   3.6 Stokes times with slip velocity 0.036 = `v_t (1 - a/g)`.
 
-## 3. GPU roadmap (open)
+The numbers above are with `qtl = 0`; with `qtl = 1` they change in the fifth
+digit (mean `phi_p` is small and nearly uniform). The imposed divergence has
+RMS 2.0e-4 at t = 0.2; the solved `div u` differs from it by 6.0e-5 RMS, the
+same as nekRS's own pointwise divergence error without QTL in this run
+(5.9e-5), so the constraint is enforced to the discretisation error. Dense,
+strongly non-uniform `phi_p` is still untested.
+
+Verification, EL–IBM (`el_ibm_collision`, fully periodic unit box, 8^3 N=5
+elements, IBM sphere R = 0.15, rho_b/rho_f = 4, initially at rest; 200 EL
+particles d_p = 0.01, rho_p = 2000 (Stokes time 1.1) fired at it at 0.5;
+k_n = 500, e = 0.9, 10 particle sub-steps per fluid step dt = 5e-3, 240 steps;
+1 and 4 ranks agree to the last printed digit but one):
+
+- no EL particle enters the sphere: the closest centre stays at
+  0.47 d_p or more from the surface (touching is 0.5 d_p);
+- the sphere is pushed from u = 0.03 (carried by the flow the cloud drags
+  along) to 0.27 while the cloud hits it between t = 0.15 and 0.35; the first
+  particles rebound (up to 14 with u_x < 0), later ones only slow down since
+  the sphere is already moving;
+- total x momentum (fluid + EL + body excess) drifts by -1.0 % of the initial
+  EL momentum by t = 1.2; -0.4 % of it builds up before any contact (the
+  `1/(1 - phi_p)` factor in the dense cloud), the rest from contacts and IBM
+  (lagged forces, the rigid internal-fluid model, contact impulse taken at the
+  last RK stage);
+- IBM slip (RMS `|u_body - u|` at the markers) is 5e-3 at the end, under 2 %
+  of the body speed, and peaks at 1.8e-2 during the impacts.
+
+## 3. Known limitations
+
+- Body contact impulses use the force of the last RK stage of each sub-step,
+  not the RK-weighted average the EL particle actually received, so momentum
+  exchange in contact is first order in the sub-step.
+- No IBM–IBM contact and no wall contact; ppiclF's wall support
+  (`InitWall`) is wrapped but not used by the EL + IBM model.
+- Gravity acts on EL particles without buoyancy (heavy-particle limit).
+- One Gaussian width serves both EL projection and IBM spreading (ppiclF has
+  a single filter), so it must suit both: wider than the GLL spacing and
+  narrow enough for the IBM interface.
+- Bodies are replicated on every rank; fine for tens of bodies, not for
+  thousands.
+
+## 4. GPU roadmap (open)
 
 The bottleneck of a GPU port of ppiclF as-is is not compute but the overlap-mesh
 exchange: ppiclF's bins (particle bounding box, one bin per rank) are unrelated

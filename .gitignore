@@ -1,7 +1,9 @@
-/build/
-.cache/
-cmake.log
-*.vtu
+*.bp/
 *.f0*
 *.fld
-*.bp/
+*.nek5000
+*.vtu
+.cache/
+/build/
+cmake.log
+snapshots/

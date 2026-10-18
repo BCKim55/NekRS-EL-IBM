@@ -1,0 +1,234 @@
+// EL-IBM collision demo: a cylindrical cloud of heavy EL point particles is
+// fired along +x at a free IBM sphere resting in a fully periodic box.
+//
+// Reported every `report_interval` steps:
+//   body x, u      : IBM sphere position and velocity (x)
+//   contacts       : EL particles currently touching the sphere
+//   gap/dp         : min over EL of (|x_p - x_b| - R - dp/2) / dp; overlap
+//                    of the soft contact shows as a small negative number,
+//                    a particle inside the sphere as a large one
+//   bounced        : EL particles moving backwards (u_x < 0)
+//   P              : x momentum of fluid, EL, body (excess over displaced
+//                    fluid, see src/elibm.hpp); no external force acts, so
+//                    the sum must stay at the initial EL momentum
+//   slip           : RMS |u_body - u| at the IBM markers
+// Every `snapshot_interval` steps rank 0 writes snapshots/el_XXXXX.csv
+// (EL particles) and appends to snapshots/body.csv, which
+// scripts/plot_collision.py turns into figures.
+
+#include <filesystem>
+#include <random>
+
+#include "elibm.hpp"
+
+static int nPartGlobal, reportInterval, snapshotInterval, substeps, qtl;
+static double bodyRadius, bodyRho, dp, rhop, cloudSpeed, cloudRadius, cloudXmin, cloudXmax;
+static double kn, restitution, filterWidth, markerSpacing;
+
+static std::unique_ptr<elibm::Coupling> coupling;
+static double P0 = 0;
+
+#ifdef __okl__
+
+#endif
+
+static double minImage(double d, int k)
+{
+  const double len = coupling->domainHi()[k] - coupling->domainLo()[k];
+  return d - len * std::nearbyint(d / len);
+}
+
+// rank-local EL particles as rows of (id, x, y, z, u, v, w, contact)
+static std::vector<double> localEl()
+{
+  std::vector<double> y, r, rows;
+  ppiclf::particles(y, r);
+  for (int i = 0; i < ppiclf::numParticles(); i++) {
+    const double *ri = &r[i * PPICLF_LRP];
+    if (std::lround(ri[PPICLF_R_JTYPE - 1]) != PPICLF_TYPE_EL) {
+      continue;
+    }
+    const double *yi = &y[i * PPICLF_LRS];
+    const bool touching = ri[PPICLF_R_JCX - 1] != 0 || ri[PPICLF_R_JCY - 1] != 0 || ri[PPICLF_R_JCZ - 1] != 0;
+    rows.insert(rows.end(), {ri[PPICLF_R_JID - 1], yi[0], yi[1], yi[2], yi[3], yi[4], yi[5], touching ? 1.0 : 0.0});
+  }
+  return rows;
+}
+
+static void writeSnapshot(double time, int tstep)
+{
+  auto comm = platform->comm.mpiComm();
+  const auto rows = localEl();
+  int n = rows.size();
+  std::vector<int> counts(platform->comm.mpiCommSize()), displs(counts.size(), 0);
+  MPI_Gather(&n, 1, MPI_INT, counts.data(), 1, MPI_INT, 0, comm);
+  std::vector<double> all;
+  if (platform->comm.mpiRank() == 0) {
+    for (size_t r = 1; r < counts.size(); r++) {
+      displs[r] = displs[r - 1] + counts[r - 1];
+    }
+    all.resize(displs.back() + counts.back());
+  }
+  MPI_Gatherv(rows.data(), n, MPI_DOUBLE, all.data(), counts.data(), displs.data(), MPI_DOUBLE, 0, comm);
+  if (platform->comm.mpiRank() != 0) {
+    return;
+  }
+
+  std::filesystem::create_directories("snapshots");
+  char name[64];
+  snprintf(name, sizeof(name), "snapshots/el_%05d.csv", tstep);
+  FILE *f = fopen(name, "w");
+  fprintf(f, "id,x,y,z,u,v,w,contact\n");
+  for (size_t i = 0; i < all.size(); i += 8) {
+    fprintf(f, "%d,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e,%d\n",
+            static_cast<int>(all[i]), all[i + 1], all[i + 2], all[i + 3], all[i + 4], all[i + 5], all[i + 6],
+            static_cast<int>(all[i + 7]));
+  }
+  fclose(f);
+
+  const auto &b = coupling->bodies()[0];
+  const bool first = tstep == 0;
+  f = fopen("snapshots/body.csv", first ? "w" : "a");
+  if (first) {
+    fprintf(f, "step,t,x,y,z,u,v,w,radius\n");
+  }
+  fprintf(f, "%d,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e\n", tstep, time, b.x[0], b.x[1], b.x[2], b.v[0], b.v[1],
+          b.v[2], b.radius);
+  fclose(f);
+}
+
+static void report(double time, int tstep)
+{
+  auto comm = platform->comm.mpiComm();
+  const auto tot = coupling->totals();
+  const auto &body = coupling->bodies()[0];
+
+  const auto rows = localEl();
+  double gapMin = std::numeric_limits<double>::max();
+  int counts[2] = {0, 0}; // in contact, bounced
+  for (size_t i = 0; i < rows.size(); i += 8) {
+    double d2 = 0;
+    for (int k = 0; k < 3; k++) {
+      const double d = minImage(rows[i + 1 + k] - body.x[k], k);
+      d2 += d * d;
+    }
+    gapMin = std::min(gapMin, (std::sqrt(d2) - body.radius - 0.5 * dp) / dp);
+    counts[0] += rows[i + 7] > 0;
+    counts[1] += rows[i + 4] < 0;
+  }
+  MPI_Allreduce(MPI_IN_PLACE, &gapMin, 1, MPI_DOUBLE, MPI_MIN, comm);
+  MPI_Allreduce(MPI_IN_PLACE, counts, 2, MPI_INT, MPI_SUM, comm);
+
+  const double Ptot = tot.fluidMomentum[0] + tot.elMomentum[0] + tot.bodyMomentum[0];
+  if (tstep == 0) {
+    P0 = Ptot;
+  }
+  if (platform->comm.mpiRank() == 0) {
+    printf("collision: step %d  t %.3f  body x %.5f u %.5f  contacts %d  gap/dp %.3f  bounced %d/%lld  "
+           "Pf %.5e  Pel %.5e  Pb %.5e  dP/P0 %.3e  slip %.3e\n",
+           tstep,
+           time,
+           body.x[0],
+           body.v[0],
+           counts[0],
+           gapMin,
+           counts[1],
+           tot.nEl,
+           tot.fluidMomentum[0],
+           tot.elMomentum[0],
+           tot.bodyMomentum[0],
+           (Ptot - P0) / P0,
+           coupling->slipRms());
+  }
+}
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  auto get = [](const char *key, auto &v) { platform->par->extract("casedata", key, v); };
+  get("body_radius", bodyRadius);
+  get("body_rho", bodyRho);
+  get("nparticles", nPartGlobal);
+  get("dp", dp);
+  get("rhop", rhop);
+  get("cloud_speed", cloudSpeed);
+  get("cloud_radius", cloudRadius);
+  get("cloud_xmin", cloudXmin);
+  get("cloud_xmax", cloudXmax);
+  get("kn", kn);
+  get("restitution", restitution);
+  get("substeps", substeps);
+  get("filter_width", filterWidth);
+  get("marker_spacing", markerSpacing);
+  get("qtl", qtl);
+  get("report_interval", reportInterval);
+  get("snapshot_interval", snapshotInterval);
+}
+
+void UDF_Setup()
+{
+  elibm::Config cfg;
+  platform->options.getArgs("FLUID DENSITY", cfg.rhof);
+  platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+  cfg.periodic = {true, true, true};
+  cfg.filterWidth = filterWidth;
+  cfg.markerSpacing = markerSpacing;
+  cfg.kn = kn;
+  cfg.restitution = restitution;
+  cfg.neighborWidth = dp;
+  cfg.substeps = substeps;
+  cfg.qtl = qtl != 0;
+
+  coupling = std::make_unique<elibm::Coupling>(nrs, cfg);
+  const auto lo = coupling->domainLo();
+  const auto hi = coupling->domainHi();
+  const double yc = 0.5 * (lo[1] + hi[1]);
+  const double zc = 0.5 * (lo[2] + hi[2]);
+
+  elibm::Body body;
+  body.radius = bodyRadius;
+  body.rho = bodyRho;
+  body.x = {0.5 * (lo[0] + hi[0]), yc, zc};
+  coupling->addBody(body);
+
+  // EL cloud on rank 0: uniform in the cylinder, no initial overlaps
+  if (platform->comm.mpiRank() == 0) {
+    std::mt19937_64 gen(2026);
+    std::uniform_real_distribution<double> uni(0.0, 1.0);
+    std::vector<elibm::vec3> placed;
+    while (static_cast<int>(placed.size()) < nPartGlobal) {
+      const double r = cloudRadius * std::sqrt(uni(gen));
+      const double th = 2 * M_PI * uni(gen);
+      const elibm::vec3 x = {cloudXmin + uni(gen) * (cloudXmax - cloudXmin),
+                             yc + r * std::cos(th),
+                             zc + r * std::sin(th)};
+      bool clear = true;
+      for (const auto &q : placed) {
+        const double d2 = (x[0] - q[0]) * (x[0] - q[0]) + (x[1] - q[1]) * (x[1] - q[1]) + (x[2] - q[2]) * (x[2] - q[2]);
+        clear = clear && d2 > 2.25 * dp * dp;
+      }
+      if (!clear) {
+        continue;
+      }
+      placed.push_back(x);
+      elibm::ElParticle p;
+      p.x = x;
+      p.v = {cloudSpeed, 0, 0};
+      p.dp = dp;
+      p.rho = rhop;
+      coupling->addEl(p);
+    }
+  }
+  coupling->initialize();
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  coupling->step(time, tstep);
+
+  if (tstep % reportInterval == 0 || nrs->lastStep) {
+    report(time, tstep);
+  }
+  if (tstep % snapshotInterval == 0 || nrs->lastStep) {
+    writeSnapshot(time, tstep);
+  }
+}

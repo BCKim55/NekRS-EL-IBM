@@ -1,0 +1,47 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+numSteps = 240
+dt = 5e-3
+timeStepper = tombo2
+checkpointControl = steps
+checkpointInterval = 40
+
+[MESH]
+# 8^3 elements on the fully periodic unit box (genbox < collision.box)
+file = "collision.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-8
+
+[FLUID VELOCITY]
+boundaryTypeMap = none
+residualTol = 1e-10
+rho = 1.0
+viscosity = 0.01
+
+[CASEDATA]
+# IBM sphere, initially at rest in the box centre
+body_radius = 0.15
+body_rho = 4.0
+# EL cloud: a cylinder of particles fired at the sphere along +x
+nparticles = 200
+dp = 0.01
+rhop = 2000.0
+cloud_speed = 0.5
+cloud_radius = 0.10
+cloud_xmin = 0.08
+cloud_xmax = 0.28
+# soft-sphere contact (EL-EL and EL-IBM); contact time ~ 4.5e-3,
+# resolved by 10 particle sub-steps per fluid step
+kn = 500.0
+restitution = 0.9
+substeps = 10
+# Gaussian FWHM for projection and IBM spreading, IBM marker spacing (~h)
+filter_width = 0.06
+marker_spacing = 0.025
+qtl = 1
+report_interval = 10
+snapshot_interval = 4

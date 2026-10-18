@@ -5,6 +5,8 @@
 #   scripts/build_ppiclf.sh <case user_routines dir> <build dir>
 #
 # Sources come from the pinned external/ppiclF plus patches/ppiclF/*.patch.
+# A case without user_routines/ppiclf_user.f uses the shared EL+IBM model
+# (src/ppiclf_user_elibm.f; its PPICLF_USER.h includes PPICLF_ELIBM.h).
 # Writes <build dir>/udf.env with NEKRS_UDF_INCLUDES / NEKRS_UDF_LIBS for the UDF.
 set -euo pipefail
 
@@ -17,7 +19,10 @@ FC=${FC:-mpif77}
 CC=${CC:-mpicc}
 
 src="$out/ppiclF"
-stamp=$(cat "$user/PPICLF_USER.h" "$user/ppiclf_user.f" "$root/src/ppiclf_cbind.f" \
+user_f="$user/ppiclf_user.f"
+[ -f "$user_f" ] || user_f="$root/src/ppiclf_user_elibm.f"
+shared=("$root/src/PPICLF_ELIBM.h" "$root/src/ELIBM.inc")
+stamp=$(cat "$user/PPICLF_USER.h" "$user_f" "${shared[@]}" "$root/src/ppiclf_cbind.f" \
           "$root"/patches/ppiclF/*.patch | shasum | cut -c1-16)
 
 if [ ! -f "$src/source/libppiclF.a" ] || [ "$(cat "$src/.stamp" 2>/dev/null)" != "$stamp" ]; then
@@ -29,8 +34,8 @@ if [ ! -f "$src/source/libppiclF.a" ] || [ "$(cat "$src/.stamp" 2>/dev/null)" !=
   for p in "$root"/patches/ppiclF/*.patch; do
     patch -s -p1 -d "$src" < "$p"
   done
-  cp "$user/PPICLF_USER.h" "$src/source/"
-  cat "$user/ppiclf_user.f" "$root/src/ppiclf_cbind.f" > "$src/source/ppiclf_user.f"
+  cp "$user/PPICLF_USER.h" "${shared[@]}" "$src/source/"
+  cat "$user_f" "$root/src/ppiclf_cbind.f" > "$src/source/ppiclf_user.f"
 
   # -fPIC: the library ends up inside the nekRS UDF shared object.
   CFLAGS="-O2 -fPIC" make -C "$src" FC="$FC" CC="$CC" FFLAGS="-cpp -std=legacy -O2 -fPIC"
