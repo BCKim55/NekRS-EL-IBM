@@ -3,6 +3,7 @@
 *.fld
 *.nek5000
 *.vtu
+.DS_Store
 .cache/
 /build/
 cmake.log
