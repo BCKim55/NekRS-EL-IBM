@@ -41,7 +41,7 @@ scripts/run_case.sh cases/rotation_tracer rotation 4 --backend CPU
 
 - [x] ppiclF linked into a nekRS UDF (host-staged; ppiclF runs on CPU)
 - [x] One-way tracer verification (`cases/rotation_tracer`), 1–8 ranks
-- [ ] Two-way momentum coupling (projection → `fluid->o_explicitTerms()`)
+- [x] Two-way momentum coupling (`cases/settling_twoway`), 1 and 4 ranks
 - [ ] Volume-fraction (QTL) divergence via `nrs->userDivergence`
 - [ ] IBM particles ported from NekIBM onto ppiclF
 - [ ] EL–IBM collisions in one neighbour search

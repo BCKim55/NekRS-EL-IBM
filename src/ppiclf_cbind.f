@@ -134,6 +134,20 @@
       return
       end
 !-----------------------------------------------------------------------
+      subroutine ppiclc_solve_Project()
+     > bind(C, name="ppiclc_solve_Project")
+!
+! Re-bin, exchange ghosts and project with the current particle state.
+! Inside IntegrateParticle the last projection happens before the final
+! RHS evaluation, so it lags the forces left in rprop by one RK stage.
+!
+      implicit none
+!
+      call ppiclf_solve_InitSolve
+
+      return
+      end
+!-----------------------------------------------------------------------
       subroutine ppiclc_solve_InterpFieldUser(jp,infld)
      > bind(C, name="ppiclc_solve_InterpFieldUser")
 !

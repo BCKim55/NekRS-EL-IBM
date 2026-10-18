@@ -18,6 +18,7 @@
 
 extern "C" {
 // src/ppiclf_cbind.f
+void ppiclc_solve_Project();
 void ppiclc_solve_InterpFieldUser(int *jp, double *fld);
 void ppiclc_solve_GetProFld(int *m, double *fld);
 void ppiclc_solve_GetNumParticles(int *npart);
@@ -74,13 +75,11 @@ inline void interpField(mesh_t *mesh, int jp, const occa::memory &o_fld)
   ppiclc_solve_InterpFieldUser(&jp, buf.data());
 }
 
-// Copy projected field m (1-based PPICLF_P_* index) into o_fld (device).
-inline void projectedField(mesh_t *mesh, int m, occa::memory &o_fld)
+// Projected field m (1-based PPICLF_P_* index) on the local GLL points (host).
+inline void projectedField(mesh_t *mesh, int m, std::vector<double> &fld)
 {
-  static std::vector<double> buf;
-  buf.resize(mesh->Nlocal);
-  ppiclc_solve_GetProFld(&m, buf.data());
-  o_fld.copyFrom(buf.data(), mesh->Nlocal);
+  fld.resize(mesh->Nlocal);
+  ppiclc_solve_GetProFld(&m, fld.data());
 }
 
 inline int numParticles()

@@ -1,0 +1,115 @@
+--- a/source/ppiclf_comm.f	2026-10-18 01:53:23
++++ b/source/ppiclf_comm.f	2026-10-18 01:53:23
+@@ -781,6 +781,7 @@
+       real*8 xdlen,ydlen,zdlen,rxdrng(3),rxnew(3), rfac, rxval, ryval,
+      >       rzval, rxl, ryl, rzl, rxr, ryr, rzr, distchk, dist
+       integer*4 iadd(3),gpsave(27)
++      real*8 gpxsave(3,27)
+       real*8 map(PPICLF_LRP_PRO)
+       integer*4  el_face_num(18),el_edge_num(36),el_corner_num(24),
+      >           nfacegp, nedgegp, ncornergp, iperiodicx, iperiodicy,
+@@ -946,12 +947,6 @@
+             nrank = ndumn
+ 
+             if (nrank .eq. ppiclf_nid .and. iflgsum .eq. 0) cycle
+-
+-            do i=1,isave
+-               if (gpsave(i) .eq. nrank .and. iflgsum .eq.0) goto 111
+-            enddo
+-            isave = isave + 1
+-            gpsave(isave) = nrank
+ 
+             ibctype = iflgx+iflgy+iflgz
+                  
+@@ -964,6 +959,21 @@
+             iadd(3) = kk1
+ 
+             call ppiclf_comm_CheckPeriodicBC(rxnew,rxdrng,iadd)
++
++            ! a rank can need two images of one particle (unshifted and
++            ! periodic) when its bin is narrower than twice the cutoff,
++            ! so only drop a ghost that repeats both rank and position
++            do i=1,isave
++               if (gpsave(i) .eq. nrank .and.
++     >             gpxsave(1,i) .eq. rxnew(1) .and.
++     >             gpxsave(2,i) .eq. rxnew(2) .and.
++     >             gpxsave(3,i) .eq. rxnew(3)) goto 111
++            enddo
++            isave = isave + 1
++            gpsave(isave) = nrank
++            gpxsave(1,isave) = rxnew(1)
++            gpxsave(2,isave) = rxnew(2)
++            gpxsave(3,isave) = rxnew(3)
+                  
+             ppiclf_npart_gp = ppiclf_npart_gp + 1
+             ppiclf_iprop_gp(1,ppiclf_npart_gp) = nrank
+@@ -1042,12 +1052,6 @@
+ 
+             if (nrank .eq. ppiclf_nid .and. iflgsum .eq. 0) cycle
+ 
+-            do i=1,isave
+-               if (gpsave(i) .eq. nrank .and. iflgsum .eq.0) goto 222
+-            enddo
+-            isave = isave + 1
+-            gpsave(isave) = nrank
+-
+             ibctype = iflgx+iflgy+iflgz
+                  
+             rxnew(1) = rxval
+@@ -1059,6 +1063,21 @@
+             iadd(3) = kk1
+ 
+             call ppiclf_comm_CheckPeriodicBC(rxnew,rxdrng,iadd)
++
++            ! a rank can need two images of one particle (unshifted and
++            ! periodic) when its bin is narrower than twice the cutoff,
++            ! so only drop a ghost that repeats both rank and position
++            do i=1,isave
++               if (gpsave(i) .eq. nrank .and.
++     >             gpxsave(1,i) .eq. rxnew(1) .and.
++     >             gpxsave(2,i) .eq. rxnew(2) .and.
++     >             gpxsave(3,i) .eq. rxnew(3)) goto 222
++            enddo
++            isave = isave + 1
++            gpsave(isave) = nrank
++            gpxsave(1,isave) = rxnew(1)
++            gpxsave(2,isave) = rxnew(2)
++            gpxsave(3,isave) = rxnew(3)
+                  
+             ppiclf_npart_gp = ppiclf_npart_gp + 1
+             ppiclf_iprop_gp(1,ppiclf_npart_gp) = nrank
+@@ -1137,12 +1156,6 @@
+ 
+             if (nrank .eq. ppiclf_nid .and. iflgsum .eq. 0) cycle
+ 
+-            do i=1,isave
+-               if (gpsave(i) .eq. nrank .and. iflgsum .eq.0) goto 333
+-            enddo
+-            isave = isave + 1
+-            gpsave(isave) = nrank
+-
+             ibctype = iflgx+iflgy+iflgz
+                  
+             rxnew(1) = rxval
+@@ -1154,6 +1167,21 @@
+             iadd(3) = kk1
+ 
+             call ppiclf_comm_CheckPeriodicBC(rxnew,rxdrng,iadd)
++
++            ! a rank can need two images of one particle (unshifted and
++            ! periodic) when its bin is narrower than twice the cutoff,
++            ! so only drop a ghost that repeats both rank and position
++            do i=1,isave
++               if (gpsave(i) .eq. nrank .and.
++     >             gpxsave(1,i) .eq. rxnew(1) .and.
++     >             gpxsave(2,i) .eq. rxnew(2) .and.
++     >             gpxsave(3,i) .eq. rxnew(3)) goto 333
++            enddo
++            isave = isave + 1
++            gpsave(isave) = nrank
++            gpxsave(1,isave) = rxnew(1)
++            gpxsave(2,isave) = rxnew(2)
++            gpxsave(3,isave) = rxnew(3)
+                  
+             ppiclf_npart_gp = ppiclf_npart_gp + 1
+             ppiclf_iprop_gp(1,ppiclf_npart_gp) = nrank
