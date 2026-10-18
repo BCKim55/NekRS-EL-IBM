@@ -37,20 +37,29 @@ def load(case):
     return frames, body
 
 
-def draw(ax, el, b, title):
+def draw(ax, el, b, title, meridional=False):
+    """x-y projection, or the meridional view (x, distance from the x axis
+    through the sphere centre), in which the sphere is an exact half disc and
+    a particle can only appear inside it by actually penetrating."""
     ax.clear()
-    ax.add_patch(plt.Circle((b["x"], b["y"]), b["radius"], color="0.75", ec="0.3", lw=1.0, zorder=1))
+    if meridional:
+        h = np.hypot(el["y"] - b["y"], el["z"] - b["z"])
+        yc, ylim, ylabel = 0.0, (0.0, 0.3), r"$\rho$ (distance from axis)"
+    else:
+        h = el["y"]
+        yc, ylim, ylabel = b["y"], (0.2, 0.8), "y"
+    ax.add_patch(plt.Circle((b["x"], yc), b["radius"], color="0.75", ec="0.3", lw=1.0, zorder=1))
     touching = el["contact"] > 0
-    sc = ax.scatter(el["x"], el["y"], c=el["u"], cmap="coolwarm", vmin=-0.5, vmax=0.5, s=6, zorder=2)
-    ax.scatter(el["x"][touching], el["y"][touching], facecolors="none", edgecolors="k", s=30, lw=0.8, zorder=3)
-    ax.annotate("", xy=(b["x"] + 0.4 * b["u"] + 1e-9, b["y"]), xytext=(b["x"], b["y"]),
+    sc = ax.scatter(el["x"], h, c=el["u"], cmap="coolwarm", vmin=-0.5, vmax=0.5, s=6, zorder=2)
+    ax.scatter(el["x"][touching], h[touching], facecolors="none", edgecolors="k", s=30, lw=0.8, zorder=3)
+    ax.annotate("", xy=(b["x"] + 0.4 * b["u"] + 1e-9, yc), xytext=(b["x"], yc),
                 arrowprops=dict(arrowstyle="->", color="k", lw=1.5), zorder=4)
     ax.set_xlim(0, 1)
-    ax.set_ylim(0.2, 0.8)
+    ax.set_ylim(*ylim)
     ax.set_aspect("equal")
     ax.set_title(title, fontsize=9)
     ax.set_xlabel("x")
-    ax.set_ylabel("y")
+    ax.set_ylabel(ylabel)
     return sc
 
 
@@ -65,7 +74,9 @@ def main():
     sc = None
     for k, (step, t, el, b) in enumerate(picks):
         ax = fig.add_subplot(2, 4, k + 1)
-        sc = draw(ax, el, b, f"t = {t:.2f}  (step {step})")
+        sc = draw(ax, el, b, f"t = {t:.2f}  (step {step})", meridional=True)
+        if k > 0:
+            ax.set_ylabel("")
     cax = fig.add_axes([0.92, 0.55, 0.012, 0.33])
     fig.colorbar(sc, cax=cax, label="EL particle $u_x$")
 
@@ -94,18 +105,20 @@ def main():
     ax2.set_ylabel("EL in contact", color="C0")
     ax.legend(fontsize=8, loc="upper right")
     ax.grid(alpha=0.3)
-    fig.suptitle("EL point particles fired at a free IBM sphere (view along z; circled: in contact with the sphere; arrow: sphere velocity)")
+    fig.suptitle("EL point particles fired at a free IBM sphere (meridional view: x vs distance from the axis through"
+                 " the sphere centre;\nthe sphere is an exact half disc here, circled: in contact, arrow: sphere velocity)")
     fig.savefig(os.path.join(out, "collision_summary.png"), dpi=130, bbox_inches="tight")
 
-    # animation
-    fig, ax = plt.subplots(figsize=(7, 4.5))
+    # animation: the x-y projection next to the meridional view
+    fig, axs = plt.subplots(1, 2, figsize=(11, 4.2))
 
     def update(i):
         step, t, el, b = frames[i]
-        draw(ax, el, b, f"EL-IBM collision, t = {t:.3f}")
+        draw(axs[0], el, b, f"x-y projection (particles above/below the sphere overlap it), t = {t:.3f}")
+        draw(axs[1], el, b, "meridional view (true distance to the sphere)", meridional=True)
 
     anim = FuncAnimation(fig, update, frames=len(frames))
-    anim.save(os.path.join(out, "collision.gif"), writer=PillowWriter(fps=8), dpi=90)
+    anim.save(os.path.join(out, "collision.gif"), writer=PillowWriter(fps=8), dpi=80)
     print("wrote", os.path.join(out, "collision_summary.png"), "and collision.gif")
 
 

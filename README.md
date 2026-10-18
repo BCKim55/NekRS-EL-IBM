@@ -8,6 +8,11 @@ direct forcing.
 
 ![EL particles fired at a free IBM sphere](docs/img/collision.gif)
 
+*Left: x–y projection, where particles above and below the sphere overlap its
+outline. Right: x against the distance from the axis through the sphere
+centre, where the sphere is an exact half disc; no particle enters it (closest
+centre 0.47 d_p from the surface, touching at 0.5 d_p).*
+
 - EL particles: drag, gravity, two-way momentum coupling (Gaussian projection,
   `F / (1 - phi_p)`), volume-filtered continuity
   `div u = -(1/phi_f) D phi_f/Dt`, soft-sphere EL–EL contact.
@@ -74,3 +79,10 @@ the shared model in `src/`, or the patches change, and always relinks the UDF.
 - [x] EL–EL and EL–IBM soft-sphere contact
 - [ ] IBM–IBM contact, particle–wall contact (ppiclF walls are not wired yet)
 - [ ] GPU particle path (see `docs/design.md`)
+
+## License
+
+BSD 3-Clause, see [LICENSE](LICENSE). The submodules keep their own licenses
+(nekRS and NekIBM: UChicago Argonne BSD-style; ppiclF: MIT). The patches in
+`patches/ppiclF/` modify ppiclF source and remain under ppiclF's MIT license,
+[patches/ppiclF/LICENSE.ppiclF](patches/ppiclF/LICENSE.ppiclF).
