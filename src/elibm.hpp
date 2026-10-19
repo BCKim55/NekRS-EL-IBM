@@ -49,6 +49,7 @@ void ppiclc_elibm_SetBodies(int *nb,
                             double *radius,
                             double *mass);
 void ppiclc_elibm_PlaceMarkers();
+void ppiclc_elibm_BeginStep();
 }
 
 namespace elibm
@@ -276,7 +277,7 @@ public:
     ppiclc_elibm_SetFluid(&mu, &rhof, g.data(), &dtf);
 
     // 1. particles
-    std::vector<vec3> impulse(bodyList.size(), vec3{});
+    ppiclc_elibm_BeginStep();
     double dts = dt / cfg.substeps;
     for (int s = 0; s < cfg.substeps; s++) {
       ppiclf::interpField(mesh, PPICLF_R_JUX, fluid->o_U.slice(0 * fluid->fieldOffset, mesh->Nlocal));
@@ -289,32 +290,34 @@ public:
       int iostep = out ? cfg.ioStep : (1 << 30);
       double t = time - dt + (s + 1) * dts;
       ppiclc_solve_IntegrateParticle(&istep, &iostep, &dts, &t);
+    }
 
-      if (bodyList.size()) {
-        ppiclf::particles(yLoc, rLoc);
-        for (int i = 0; i < ppiclf::numParticles(); i++) {
-          const double *r = &rLoc[i * PPICLF_LRP];
-          if (std::lround(r[PPICLF_R_JTYPE - 1]) != PPICLF_TYPE_EL) {
-            continue;
+    // contact impulse each EL particle received from the bodies over the
+    // step (RK-weighted in Fortran); the reaction goes to the nearest body
+    std::vector<vec3> impulse(bodyList.size(), vec3{});
+    if (bodyList.size()) {
+      ppiclf::particles(yLoc, rLoc);
+      for (int i = 0; i < ppiclf::numParticles(); i++) {
+        const double *r = &rLoc[i * PPICLF_LRP];
+        if (std::lround(r[PPICLF_R_JTYPE - 1]) != PPICLF_TYPE_EL) {
+          continue;
+        }
+        const vec3 imp = {r[PPICLF_R_JIX - 1], r[PPICLF_R_JIY - 1], r[PPICLF_R_JIZ - 1]};
+        if (imp[0] == 0 && imp[1] == 0 && imp[2] == 0) {
+          continue;
+        }
+        const vec3 xp = {yLoc[i * PPICLF_LRS], yLoc[i * PPICLF_LRS + 1], yLoc[i * PPICLF_LRS + 2]};
+        size_t bmin = 0;
+        double gmin = std::numeric_limits<double>::max();
+        for (size_t b = 0; b < bodyList.size(); b++) {
+          const double gap = norm(minImage(sub(xp, bodyList[b].x))) - bodyList[b].radius;
+          if (gap < gmin) {
+            gmin = gap;
+            bmin = b;
           }
-          const vec3 fc = {r[PPICLF_R_JCX - 1], r[PPICLF_R_JCY - 1], r[PPICLF_R_JCZ - 1]};
-          if (fc[0] == 0 && fc[1] == 0 && fc[2] == 0) {
-            continue;
-          }
-          // the reaction goes to the body whose surface is nearest
-          const vec3 xp = {yLoc[i * PPICLF_LRS], yLoc[i * PPICLF_LRS + 1], yLoc[i * PPICLF_LRS + 2]};
-          size_t bmin = 0;
-          double gmin = std::numeric_limits<double>::max();
-          for (size_t b = 0; b < bodyList.size(); b++) {
-            const double gap = norm(minImage(sub(xp, bodyList[b].x))) - bodyList[b].radius;
-            if (gap < gmin) {
-              gmin = gap;
-              bmin = b;
-            }
-          }
-          for (int k = 0; k < 3; k++) {
-            impulse[bmin][k] -= dts * fc[k];
-          }
+        }
+        for (int k = 0; k < 3; k++) {
+          impulse[bmin][k] -= imp[k];
         }
       }
     }

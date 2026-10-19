@@ -142,19 +142,16 @@ k_n = 500, e = 0.9, 10 particle sub-steps per fluid step dt = 5e-3, 240 steps;
   along) to 0.27 while the cloud hits it between t = 0.15 and 0.35; the first
   particles rebound (up to 14 with u_x < 0), later ones only slow down since
   the sphere is already moving;
-- total x momentum (fluid + EL + body excess) drifts by -1.0 % of the initial
-  EL momentum by t = 1.2; -0.4 % of it builds up before any contact (the
-  `1/(1 - phi_p)` factor in the dense cloud), the rest from contacts and IBM
-  (lagged forces, the rigid internal-fluid model, contact impulse taken at the
-  last RK stage);
+- total x momentum (fluid + EL + body excess) drifts by -0.3 % of the initial
+  EL momentum by t = 1.2 (-1.0 % before the body contact impulse was made
+  RK-weighted); -0.4 % of it builds up before any contact (the
+  `1/(1 - phi_p)` factor in the dense cloud), the rest from the IBM coupling
+  (lagged forces, the rigid internal-fluid model);
 - IBM slip (RMS `|u_body - u|` at the markers) is 5e-3 at the end, under 2 %
   of the body speed, and peaks at 1.8e-2 during the impacts.
 
 ## 3. Known limitations
 
-- Body contact impulses use the force of the last RK stage of each sub-step,
-  not the RK-weighted average the EL particle actually received, so momentum
-  exchange in contact is first order in the sub-step.
 - No IBM–IBM contact and no wall contact; ppiclF's wall support
   (`InitWall`) is wrapped but not used by the EL + IBM model.
 - Gravity acts on EL particles without buoyancy (heavy-particle limit).
@@ -163,27 +160,88 @@ k_n = 500, e = 0.9, 10 particle sub-steps per fluid step dt = 5e-3, 240 steps;
   narrow enough for the IBM interface.
 - Bodies are replicated on every rank; fine for tens of bodies, not for
   thousands.
+- The body contact impulse is the RK-weighted integral of the force the EL
+  particle received (`ppiclc_elibm_BeginStep`, `rprop(JI*)`), so EL–body
+  momentum exchange is now consistent with the particle update; the body
+  itself is still advanced with forward Euler.
 
-## 4. GPU roadmap (open)
+## 4. EL particles on the GPU (`src/elgpu.hpp`, prototype)
 
-The bottleneck of a GPU port of ppiclF as-is is not compute but the overlap-mesh
-exchange: ppiclF's bins (particle bounding box, one bin per rank) are unrelated
-to the fluid partition, so every RHS evaluation ships element coordinates,
-fluid fields and projected fields (whole GLL elements) between fluid owners and
-bin owners, and re-bins every stage.
+### What nekRS already provides
 
-Direction under consideration: keep nekRS's `lpm_t` ownership (particle lives
-on the rank owning its element, so interpolation and projection are local) and
-port only what `lpm_t` lacks from ppiclF:
+`lpm_t` keeps the particle state on the device and does findpts, interpolation,
+RK/AB integration and migration (host crystal router). After `migrate()` every
+particle lives on the rank owning its element and `interpolator().data()`
+holds that element and the reference coordinates in particle order on the
+host — exactly what a projection kernel needs, and two small arrays to copy.
 
-- ghost particles within the filter width, sent to ranks whose element AABBs
-  are within reach (host or GPU-aware MPI exchange of particles, not meshes);
-- a device cell list (counting sort) for collisions and Gaussian projection;
-- projection either as ppiclF's direct Gaussian sum (needs ghosts) or as a
-  transpose-interpolation deposit + `oogs` dssum + Helmholtz (diffusion) filter
-  (needs no ghosts; watch negative high-order weights for `phi_p`).
+### What was added (`src/elgpu.okl`)
 
-Open questions: load imbalance when particles cluster (element ownership has
-no bin balancing), `lpm_t::maxEntriesPerParticleMigration = 50`, and how IBM
-marker → body reductions (NekIBM queen/worker) map onto device segmented
-reductions.
+- `elgpuRHS`: Schiller–Naumann drag + gravity as the `lpm_t` user RHS.
+- `elgpuForce`: the force on the fluid and the particle volume per particle,
+  from the *current* fluid velocity at the new positions
+  (`pointInterpolation_t::eval`; `lpm_t::interpolate()` would use the state
+  extrapolated to the last RK stage).
+- `elgpuDeposit`: transpose interpolation, `acc_n += q_p l_j(r) l_k(s) l_l(t)`
+  over the nodes of the particle's element (`@atomic`), then `oogs` gather-
+  scatter and division by the assembled mass matrix: the L2 projection of the
+  point sources, conservative to round-off (`proj` = 5e-16 in
+  `settling_gpu`). No ghost particles are needed: the projection is assembled
+  across elements by the gather-scatter.
+- Gaussian filter as explicit diffusion to pseudo-time `sigma^2 / 2` with
+  `L f = invM dssum(K f)`, `K` the SEM stiffness matrix of nekRS's elliptic
+  solvers (`core-weakLaplacianHex3D`); the weak form integrates to zero, so
+  the filter conserves. The step is set from the spectral radius of `L`,
+  measured once by power iteration (4.2e4 on the 6^3 N=5 box: 57 steps of
+  3.6e-5 per field), and the sign from the Rayleigh quotient. Two things
+  found on the way: `opSEM::laplacian` wraps this kernel but is unused in
+  nekRS and passes an uninitialised field-offset table to it (segfault), and
+  the obvious substitute, the weak divergence of the dssum-averaged strong
+  gradient, has a spectral radius 3x smaller and leaves element-interface
+  kinks in `phi_p` that the pressure solver cannot follow (divergence error
+  8e-4 instead of 2e-5).
+- The QTL divergence takes `d phi_f/dt = +div(phi_p v_p)` from the projected
+  particle volume flux (deposited and filtered like the other fields) rather
+  than a finite difference in time: the L2 projection's slope is
+  discontinuous when a particle crosses an element face, and the finite
+  difference turned that into node-scale noise (imposed divergence 6x too
+  large). `Config::qtlFromFlux = false` keeps the finite difference.
+- `elgpuSource`: `FU = F / (1 - phi_p)` and the QTL divergence on the device.
+- Periodic wrap kernel; particles leaving a non-periodic domain are deleted.
+
+### Not there yet
+
+Particle–particle contact (needs a device cell list: counting sort by cell,
+then a neighbour loop; ghosts across ranks only for particles within the
+contact distance of a rank's element boundary), IBM markers (the same deposit
+kernel spreads marker forces; the body reduction is a segmented sum over
+marker ids), and walls. The Gaussian filter would be cheaper as one implicit
+Helmholtz solve with nekRS's elliptic solver than as ~60 explicit steps per
+field (7 fields), and the momentum exchange could be made consistent to
+second order by taking the fluid force as the RK-weighted particle drag
+instead of the end-of-step value.
+
+### Verification (`settling_gpu`)
+
+The `settling_twoway` case on the device path (same box, particles, filter
+width and `qtl`), 200 steps, 1 and 4 ranks identical to all printed digits.
+Against the ppiclF path at t = 0.2: fluid momentum -5.666e-2 vs -5.631e-2
+(0.6 %), particle momentum -4.865e-2 vs -4.851e-2 (0.3 %), drag sum -0.3417
+vs -0.3410 (0.2 %); imposed divergence RMS 1.98e-4 vs 2.01e-4 and the
+solver's divergence error 5.9e-5 vs 6.0e-5. Projection conservation is
+round-off (3e-16) instead of the Gaussian truncation (4.6e-4). The global
+momentum drift is -5.6e-3 of the gravity impulse (ppiclF path: -1.0e-3): the
+force on the fluid is the end-of-step drag while the particle took the
+RK-weighted drag, an O(dt) mismatch that the ppiclF path happens to cancel
+better; the remedy is in "Not there yet".
+
+### Where the time goes
+
+With ppiclF on the CPU the particle side is 87–97 % of the step
+(`udfExecuteStep` in `settling_twoway` and `el_ibm_collision`). The
+`lpm_t` path moves everything but migration and the two index arrays onto the
+device; with OCCA's serial backend it is already 8–10x faster per step than
+ppiclF for the same case (0.24 s vs 2.0 s on 1 rank, 0.09 s vs 0.9 s on 4),
+and nothing in it is host-bound on a GPU except the migration. Only the CPU
+backend has been run so far; the kernels use nothing beyond `@atomic`, which
+nekRS reports as supported on the device.

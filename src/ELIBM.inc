@@ -2,10 +2,10 @@
 !     from C++ (src/elibm.hpp) through the ppiclc_elibm_* bindings.
       real*8 elibm_mu, elibm_rhof, elibm_grav(3), elibm_dtf,
      >       elibm_kn, elibm_erest
-      integer*4 elibm_nbody, elibm_ifnb
+      integer*4 elibm_nbody, elibm_ifnb, elibm_istage
       common /elibm_par_r/ elibm_mu, elibm_rhof, elibm_grav, elibm_dtf,
      >                     elibm_kn, elibm_erest
-      common /elibm_par_i/ elibm_nbody, elibm_ifnb
+      common /elibm_par_i/ elibm_nbody, elibm_ifnb, elibm_istage
 
       integer*4 elibm_nbmax
       parameter (elibm_nbmax = 64)

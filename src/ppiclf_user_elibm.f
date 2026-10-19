@@ -111,6 +111,29 @@
       return
       end
 !-----------------------------------------------------------------------
+      subroutine ppiclc_elibm_BeginStep()
+     > bind(C, name="ppiclc_elibm_BeginStep")
+!
+! Zero the EL-IBM contact impulses and the RK stage counter; call once
+! per fluid step before the particle sub-steps.
+!
+      implicit none
+!
+      include "PPICLF"
+      include "ELIBM.inc"
+!
+      integer*4 i, k
+!
+      elibm_istage = 0
+      do i=1,ppiclf_npart
+         do k=1,3
+            ppiclf_rprop(PPICLF_R_JIX-1+k,i) = 0.0d0
+         enddo
+      enddo
+
+      return
+      end
+!-----------------------------------------------------------------------
       subroutine ppiclc_elibm_PlaceMarkers()
      > bind(C, name="ppiclc_elibm_PlaceMarkers")
 !
@@ -204,10 +227,17 @@
       include "ELIBM.inc"
 !
       real*8 rpi, rmass, dp, ur(3), rep, fd, fb(3), fc(3), r(3),
-     >       ud(3), vol
+     >       ud(3), vol, wimp
       integer*4 i, b, k
 !
       rpi = 4.0d0*atan(1.0d0)
+
+      ! weight of this RK3 stage's RHS in the step (ppiclF's SSP RK3:
+      ! stages contribute dt/6, dt/6, 2dt/3), used to integrate the
+      ! contact impulse the IBM bodies receive
+      elibm_istage = elibm_istage + 1
+      wimp = ppiclf_dt/6.0d0
+      if (mod(elibm_istage,3) .eq. 0) wimp = 2.0d0*ppiclf_dt/3.0d0
 
       do i=1,ppiclf_npart
 
@@ -270,6 +300,8 @@
             do k=1,3
                ppiclf_rprop(PPICLF_R_JCX-1+k,i) =
      >            ppiclf_rprop(PPICLF_R_JCX-1+k,i) + fb(k)
+               ppiclf_rprop(PPICLF_R_JIX-1+k,i) =
+     >            ppiclf_rprop(PPICLF_R_JIX-1+k,i) + wimp*fb(k)
             enddo
          enddo
 

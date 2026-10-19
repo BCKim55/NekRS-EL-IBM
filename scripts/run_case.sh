@@ -16,9 +16,15 @@ shift $(( $# < 3 ? $# : 3 ))
 build="$root/build/$(basename "$case_dir")"
 mkdir -p "$root/build"
 
-"$root/scripts/build_ppiclf.sh" "$case_dir/user_routines" "$build" > "$build.ppiclf.log" 2>&1 \
-  || { tail -30 "$build.ppiclf.log"; exit 1; }
-source "$build/udf.env"
+if [ -f "$case_dir/user_routines/PPICLF_USER.h" ]; then
+  "$root/scripts/build_ppiclf.sh" "$case_dir/user_routines" "$build" > "$build.ppiclf.log" 2>&1 \
+    || { tail -30 "$build.ppiclf.log"; exit 1; }
+  source "$build/udf.env"
+else
+  # device-only case (src/elgpu.hpp): no ppiclF
+  export NEKRS_UDF_INCLUDES="$root/src"
+  export NEKRS_UDF_LIBS=""
+fi
 
 cd "$case_dir"
 # nekRS rebuilds the UDF only when the .udf changes, not when libppiclF.a does

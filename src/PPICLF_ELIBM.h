@@ -8,7 +8,7 @@
  * rigid body; the body state lives outside ppiclF. */
 
 #define PPICLF_LRS 6
-#define PPICLF_LRP 17
+#define PPICLF_LRP 20
 #define PPICLF_LRP_INT 3
 #define PPICLF_LRP_PRO 7
 
@@ -43,10 +43,14 @@
 #define PPICLF_R_JRX 12
 #define PPICLF_R_JRY 13
 #define PPICLF_R_JRZ 14
-/* EL: contact force exerted by IBM bodies on the particle */
+/* EL: contact force exerted by IBM bodies on the particle (last RK stage) */
 #define PPICLF_R_JCX 15
 #define PPICLF_R_JCY 16
 #define PPICLF_R_JCZ 17
+/* EL: RK-weighted impulse of that force since ppiclc_elibm_BeginStep */
+#define PPICLF_R_JIX 18
+#define PPICLF_R_JIY 19
+#define PPICLF_R_JIZ 20
 
 /* projected fields */
 #define PPICLF_P_JFELX 1

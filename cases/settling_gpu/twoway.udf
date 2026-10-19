@@ -1,0 +1,113 @@
+// The settling_twoway case on the device particle path (src/elgpu.hpp):
+// same box, particles and parameters, no ppiclF. The columns match
+// cases/settling_twoway/twoway.udf so the two can be compared directly;
+// `proj` here is the filtered projection against the particle sum and must be
+// round-off (the L2 projection and the weak-form diffusion both conserve).
+
+#include <random>
+
+#include "elgpu.hpp"
+
+static int nPartGlobal;
+static int reportInterval;
+static int qtl, qtlFlux;
+static double rhop, dp, gz, filterWidth;
+
+// never deleted: lpm_t owns MPI resources and must not be destroyed after MPI_Finalize
+static elgpu::Coupling *coupling = nullptr;
+static double sourceZ = 0;       // int FU_z dV of the source in use
+static double sourceImpulse = 0; // int_0^t int FU_z dV dt
+
+#ifdef __okl__
+
+#endif
+
+static void report(double time, int tstep)
+{
+  const auto tot = coupling->totals();
+  const double impulse = tot.elMass * std::abs(gz) * time;
+  const double fz = tot.elForceOnFluid[2];
+  if (platform->comm.mpiRank() == 0) {
+    const double inv = impulse > 0 ? 1 / impulse : 0;
+    printf("twoway: step %d  t %.4e  Pf %.6e  Pp %.6e  sumf %.6e  "
+           "proj %.3e  fluid %.3e  total %.3e  div %.3e  divErr %.3e  npart %lld\n",
+           tstep,
+           time,
+           tot.fluidMomentum[2],
+           tot.elMomentum[2],
+           fz,
+           fz != 0 ? (tot.elForceProjected[2] - fz) / std::abs(fz) : 0.0,
+           (tot.fluidMomentum[2] - sourceImpulse) * inv,
+           (tot.fluidMomentum[2] + tot.elMomentum[2] - tot.elMass * gz * time) * inv,
+           tot.divRms,
+           tot.divErrRms,
+           tot.nEl);
+  }
+}
+
+void UDF_LoadKernels(deviceKernelProperties &kernelInfo)
+{
+  elgpu::registerKernels(kernelInfo);
+}
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  platform->par->extract("casedata", "nparticles", nPartGlobal);
+  platform->par->extract("casedata", "rhop", rhop);
+  platform->par->extract("casedata", "dp", dp);
+  platform->par->extract("casedata", "gz", gz);
+  platform->par->extract("casedata", "filter_width", filterWidth);
+  platform->par->extract("casedata", "report_interval", reportInterval);
+  platform->par->extract("casedata", "qtl", qtl);
+  platform->par->extract("casedata", "qtl_flux", qtlFlux);
+}
+
+void UDF_Setup()
+{
+  elgpu::Config cfg;
+  platform->options.getArgs("FLUID DENSITY", cfg.rhof);
+  platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+  cfg.grav = {0, 0, gz};
+  cfg.periodic = {true, true, true};
+  cfg.filterWidth = filterWidth;
+  cfg.qtl = qtl != 0;
+  cfg.qtlFromFlux = qtlFlux != 0;
+
+  coupling = new elgpu::Coupling(nrs, cfg);
+  const auto lo = coupling->domainLo();
+  const auto hi = coupling->domainHi();
+  if (platform->comm.mpiRank() == 0) {
+    printf("elgpu: Gaussian filter as %d explicit diffusion steps per field\n", coupling->smoothingSteps());
+  }
+
+  // the same particles as settling_twoway: at rest, uniformly random, rank 0
+  std::vector<double> x, v, d, r;
+  if (platform->comm.mpiRank() == 0) {
+    std::mt19937_64 gen(12345);
+    std::uniform_real_distribution<double> uni(0.0, 1.0);
+    for (int i = 0; i < nPartGlobal; i++) {
+      for (int k = 0; k < 3; k++) {
+        x.push_back(lo[k] + uni(gen) * (hi[k] - lo[k]));
+        v.push_back(0.0);
+      }
+      d.push_back(dp);
+      r.push_back(rhop);
+    }
+  }
+  double t0;
+  platform->options.getArgs("START TIME", t0);
+  coupling->initialize(x, v, d, r, t0);
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  if (tstep > 0) {
+    sourceImpulse += nrs->dt[0] * sourceZ;
+  }
+  coupling->step(time, tstep);
+  sourceZ = coupling->totals().source[2];
+
+  if (tstep % reportInterval == 0 || nrs->lastStep) {
+    report(time, tstep);
+  }
+}

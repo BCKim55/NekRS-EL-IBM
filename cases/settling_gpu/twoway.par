@@ -1,0 +1,36 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+numSteps = 200
+dt = 1e-3
+timeStepper = tombo2
+checkpointInterval = 0
+
+[MESH]
+# 6^3 elements on the fully periodic unit box (genbox < twoway.box)
+file = "twoway.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-10
+
+[FLUID VELOCITY]
+boundaryTypeMap = none
+residualTol = 1e-12
+rho = 1.0
+viscosity = 0.01
+
+[CASEDATA]
+nparticles = 10000
+rhop = 100.0
+dp = 0.01
+gz = -1.0
+# Gaussian filter full width at half maximum
+filter_width = 0.15
+report_interval = 20
+# volume-filtered continuity div u = -(1/phi_f) D phi_f/Dt (0: off)
+qtl = 1
+# d phi/dt from the projected particle volume flux (1) or by finite difference (0)
+qtl_flux = 1
+

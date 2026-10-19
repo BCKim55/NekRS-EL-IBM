@@ -1,0 +1,173 @@
+// Device kernels for src/elgpu.hpp (EL point particles on nekRS's lpm_t).
+// Particle arrays are SoA with stride `offset` (lpm_t::fieldOffset()).
+
+#define ELGPU_NQMAX 16
+#define ELGPU_PI 3.14159265358979323846
+
+// Schiller-Naumann drag coefficient times |u - v|: f_d = fd * (u - v)
+inline dfloat elgpuDragCoeff(const dfloat mu, const dfloat rhof, const dfloat dp, const dfloat urMag)
+{
+  const dfloat re = urMag * dp * rhof / mu;
+  return 3.0 * ELGPU_PI * mu * dp * (1.0 + 0.15 * pow(re, 0.687));
+}
+
+@kernel void elgpuRHS(const dlong N,
+                      const dlong offset,
+                      const int vId,
+                      const dfloat mu,
+                      const dfloat rhof,
+                      const dfloat gx,
+                      const dfloat gy,
+                      const dfloat gz,
+                      @ restrict const dfloat *y,
+                      @ restrict const dfloat *dp,
+                      @ restrict const dfloat *rhop,
+                      @ restrict const dfloat *U,
+                      @ restrict dfloat *ydot)
+{
+  for (dlong n = 0; n < N; ++n; @tile(256, @outer, @inner)) {
+    const dfloat vx = y[n + (vId + 0) * offset];
+    const dfloat vy = y[n + (vId + 1) * offset];
+    const dfloat vz = y[n + (vId + 2) * offset];
+    const dfloat urx = U[n + 0 * offset] - vx;
+    const dfloat ury = U[n + 1 * offset] - vy;
+    const dfloat urz = U[n + 2 * offset] - vz;
+    const dfloat d = dp[n];
+    const dfloat m = rhop[n] * ELGPU_PI / 6.0 * d * d * d;
+    const dfloat fd = elgpuDragCoeff(mu, rhof, d, sqrt(urx * urx + ury * ury + urz * urz));
+
+    ydot[n + 0 * offset] = vx;
+    ydot[n + 1 * offset] = vy;
+    ydot[n + 2 * offset] = vz;
+    ydot[n + (vId + 0) * offset] = fd * urx / m + gx;
+    ydot[n + (vId + 1) * offset] = fd * ury / m + gy;
+    ydot[n + (vId + 2) * offset] = fd * urz / m + gz;
+  }
+}
+
+// q = (force on the fluid, particle volume, volume flux vol * v) per particle
+@kernel void elgpuForce(const dlong N,
+                        const dlong offset,
+                        const int vId,
+                        const dfloat mu,
+                        const dfloat rhof,
+                        @ restrict const dfloat *y,
+                        @ restrict const dfloat *dp,
+                        @ restrict const dfloat *U,
+                        @ restrict dfloat *q)
+{
+  for (dlong n = 0; n < N; ++n; @tile(256, @outer, @inner)) {
+    const dfloat vx = y[n + (vId + 0) * offset];
+    const dfloat vy = y[n + (vId + 1) * offset];
+    const dfloat vz = y[n + (vId + 2) * offset];
+    const dfloat urx = U[n + 0 * offset] - vx;
+    const dfloat ury = U[n + 1 * offset] - vy;
+    const dfloat urz = U[n + 2 * offset] - vz;
+    const dfloat d = dp[n];
+    const dfloat vol = ELGPU_PI / 6.0 * d * d * d;
+    const dfloat fd = elgpuDragCoeff(mu, rhof, d, sqrt(urx * urx + ury * ury + urz * urz));
+    q[n + 0 * offset] = -fd * urx;
+    q[n + 1 * offset] = -fd * ury;
+    q[n + 2 * offset] = -fd * urz;
+    q[n + 3 * offset] = vol;
+    q[n + 4 * offset] = vol * vx;
+    q[n + 5 * offset] = vol * vy;
+    q[n + 6 * offset] = vol * vz;
+  }
+}
+
+@kernel void elgpuWrap(const dlong N,
+                       const dlong offset,
+                       const dfloat lo0,
+                       const dfloat lo1,
+                       const dfloat lo2,
+                       const dfloat len0,
+                       const dfloat len1,
+                       const dfloat len2,
+                       @ restrict dfloat *y)
+{
+  for (dlong n = 0; n < N; ++n; @tile(256, @outer, @inner)) {
+    if (len0 > 0) {
+      y[n + 0 * offset] -= len0 * floor((y[n + 0 * offset] - lo0) / len0);
+    }
+    if (len1 > 0) {
+      y[n + 1 * offset] -= len1 * floor((y[n + 1 * offset] - lo1) / len1);
+    }
+    if (len2 > 0) {
+      y[n + 2 * offset] -= len2 * floor((y[n + 2 * offset] - lo2) / len2);
+    }
+  }
+}
+
+// Transpose interpolation: acc_node += sum_p q_p * l_j(r) l_k(s) l_l(t)
+// for the nodes of the element holding p. Followed by a gather-scatter and
+// a division by the assembled mass matrix this is the L2 projection of the
+// point sources onto the GLL space (conservative to round-off).
+@kernel void elgpuDeposit(const dlong N,
+                          const dlong offset,
+                          const int Nq,
+                          const dlong fieldOffset,
+                          @ restrict const dlong *el,
+                          @ restrict const dfloat *r,
+                          @ restrict const dfloat *gllz,
+                          const int nq,
+                          @ restrict const dfloat *q,
+                          @ restrict dfloat *acc)
+{
+  for (dlong n = 0; n < N; ++n; @tile(64, @outer, @inner)) {
+    dfloat w[3 * ELGPU_NQMAX];
+    for (int d = 0; d < 3; ++d) {
+      const dfloat rr = r[3 * n + d];
+      for (int i = 0; i < Nq; ++i) {
+        dfloat p = 1.0;
+        for (int j = 0; j < Nq; ++j) {
+          if (j != i) {
+            p *= (rr - gllz[j]) / (gllz[i] - gllz[j]);
+          }
+        }
+        w[d * ELGPU_NQMAX + i] = p;
+      }
+    }
+    const dlong base = el[n] * Nq * Nq * Nq;
+    for (int l = 0; l < Nq; ++l) {
+      for (int k = 0; k < Nq; ++k) {
+        const dfloat wkl = w[1 * ELGPU_NQMAX + k] * w[2 * ELGPU_NQMAX + l];
+        for (int j = 0; j < Nq; ++j) {
+          const dfloat wt = w[j] * wkl;
+          const dlong id = base + j + k * Nq + l * Nq * Nq;
+          for (int c = 0; c < nq; ++c) {
+            @atomic acc[id + c * fieldOffset] += wt * q[n + c * offset];
+          }
+        }
+      }
+    }
+  }
+}
+
+// FU = F / (1 - phi); the QTL divergence div u = -(1/phi_f) D phi_f / Dt with
+// d phi_f/dt either from the projected particle volume flux,
+// d phi_f/dt = +div(phi_p v_p), or by finite difference in time
+@kernel void elgpuSource(const dlong N,
+                         const dlong fieldOffset,
+                         const int fromFlux,
+                         const dfloat idt,
+                         @ restrict const dfloat *acc,
+                         @ restrict const dfloat *phifLast,
+                         @ restrict const dfloat *divFlux,
+                         @ restrict const dfloat *U,
+                         @ restrict const dfloat *gradPhif,
+                         @ restrict dfloat *FU,
+                         @ restrict dfloat *div)
+{
+  for (dlong n = 0; n < N; ++n; @tile(256, @outer, @inner)) {
+    const dfloat phif = 1.0 - acc[n + 3 * fieldOffset];
+    FU[n + 0 * fieldOffset] = acc[n + 0 * fieldOffset] / phif;
+    FU[n + 1 * fieldOffset] = acc[n + 1 * fieldOffset] / phif;
+    FU[n + 2 * fieldOffset] = acc[n + 2 * fieldOffset] / phif;
+    const dfloat adv = U[n + 0 * fieldOffset] * gradPhif[n + 0 * fieldOffset] +
+                       U[n + 1 * fieldOffset] * gradPhif[n + 1 * fieldOffset] +
+                       U[n + 2 * fieldOffset] * gradPhif[n + 2 * fieldOffset];
+    const dfloat dphifdt = fromFlux ? divFlux[n] : (phif - phifLast[n]) * idt;
+    div[n] = -(dphifdt + adv) / phif;
+  }
+}
