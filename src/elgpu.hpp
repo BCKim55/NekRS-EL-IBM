@@ -46,12 +46,12 @@ struct Config {
   bool qtl = true;
   bool qtlFromFlux = true; // d phi/dt from the projected volume flux, else finite difference
   bool zeroMeanDiv = true;
-  // lpm_t's RK3 and RK4 evaluate the intermediate stages with the start-of-
-  // step state (nekRS v26 lpm.cpp, integrateRK3/4: o_y_ instead of
-  // o_ytmp_), which makes them first order for a velocity-dependent RHS;
-  // RK2 is implemented correctly. Verified in cases/spray_jet2d (single
-  // droplet vs the drag ODE).
-  int rkOrder = 2;
+  // Time integrator: 3 = our own SSP-RK3 through lpm_t's user-ODE hook
+  // (default); 1, 2 = lpm_t's RK1/RK2. lpm_t's own RK3/RK4 evaluate the
+  // intermediate stages with the start-of-step state (nekRS v26 lpm.cpp,
+  // patches/nekRS/0001-lpm-rk-stage-state.patch), which makes them first
+  // order for a velocity-dependent RHS, so they are not offered here.
+  int rkOrder = 3;
 };
 
 struct Totals {
@@ -127,8 +127,14 @@ public:
     }
 
     particles = std::make_unique<lpm_t>(mesh, nrs->dt, 0.01, 5e-13);
+    nekrsCheck(cfg.rkOrder < 1 || cfg.rkOrder > 3, comm(), EXIT_FAILURE, "rkOrder %d not supported\n", cfg.rkOrder);
     particles->setSolver("RK");
     particles->rkOrder(cfg.rkOrder);
+    if (cfg.rkOrder == 3) {
+      particles->setUserODESolver([](lpm_t *lpm, double t0, double tf, int, const deviceMemory<dfloat> &o_y, void *ud, deviceMemory<dfloat> &) {
+        static_cast<Coupling *>(ud)->ssprk3(lpm, tf - t0, o_y);
+      });
+    }
     particles->setVerbosity(lpm_t::VerbosityLevel::None);
     particles->addInterpField("fluid_velocity", mesh->dim, nrs->fluid->fieldOffset, nrs->fluid->o_U);
     particles->addVariable(mesh->dim, "velocity");
@@ -136,6 +142,7 @@ public:
     particles->addProp("rhop");
     particles->addProp("gid");
     particles->addProp("np"); // droplets per parcel
+    particles->addProp(3, "fAcc", false); // RK-weighted force on the fluid over the step (ssprk3)
     particles->addUserData(this);
     particles->setUserRHS([](lpm_t *lpm, double, const deviceMemory<dfloat> &o_y, void *ud, deviceMemory<dfloat> &o_ydot) {
       static_cast<Coupling *>(ud)->rhs(lpm, o_y, o_ydot);
@@ -161,9 +168,8 @@ public:
     pack(x, v, dp, rhop, weight, y0, prop);
     particles->initialize(n, t0, y0);
     if (n) {
-      const int np = particles->nProps();
-      for (int k = 0; k < np; k++) {
-        auto name = std::vector<std::string>{"dp", "rhop", "gid", "np"}[k];
+      for (const char *name : {"dp", "rhop", "gid", "np"}) {
+        const int k = particles->propId(name);
         particles->setProp(name, deviceMemory<dfloat>(std::vector<dfloat>(prop.begin() + k * n, prop.begin() + (k + 1) * n)));
       }
     }
@@ -188,6 +194,7 @@ public:
     if (tstep == 0) {
       return;
     }
+    fAccValid = false;
     particles->integrate(time);
     wrap();
     particles->migrate();
@@ -264,6 +271,8 @@ private:
   static constexpr int nAcc = 7; // F(3), vol, vol*v(3)
   occa::memory o_one, o_acc, o_FU, o_div, o_phifLast;
   occa::memory o_q, o_el, o_r, o_Up; // per particle: (F, vol), element, reference coords, fluid velocity
+  occa::memory o_ytmp, o_k;            // SSP-RK3 scratch
+  bool fAccValid = false;              // fAcc holds this step's RK-weighted force
 
   static MPI_Comm comm() { return platform->comm.mpiComm(); }
 
@@ -296,6 +305,7 @@ private:
       prop[i + particles->propId("rhop") * n] = rhop[i];
       prop[i + particles->propId("gid") * n] = nElGlobal + gid0 + i;
       prop[i + particles->propId("np") * n] = weight.empty() ? 1.0 : weight[i];
+      // fAcc starts at zero (prop already zero-filled)
     }
     long long total = n;
     MPI_Allreduce(MPI_IN_PLACE, &total, 1, MPI_LONG_LONG, MPI_SUM, comm());
@@ -322,6 +332,69 @@ private:
               lpm->getProp("rhop"),
               lpm->getInterpField("fluid_velocity"),
               o_ydot);
+  }
+
+  // SSP-RK3 (Shu-Osher) on the particle state, the fluid field being the
+  // one lpm_t extrapolated to the start of the step:
+  //   y1 = y + dt f(y);  y2 = 3/4 y + 1/4 (y1 + dt f(y1));
+  //   y  = 1/3 y + 2/3 (y2 + dt f(y2))
+  // Stage positions are handed to the interpolator so that the fluid
+  // velocity is taken where the stage state is.
+  void ssprk3(lpm_t *lpm, double dt, const deviceMemory<dfloat> &o_yIn)
+  {
+    deviceMemory<dfloat> o_y(o_yIn); // same device buffer, writable handle
+    const int n = lpm->numParticles();
+    const int off = lpm->fieldOffset();
+    const int nd = lpm->nDOFs();
+    const size_t len = static_cast<size_t>(nd) * std::max(off, 1);
+    if (!o_ytmp.isInitialized() || o_ytmp.length() < len) {
+      o_ytmp = platform->device.malloc<dfloat>(len);
+      o_k = platform->device.malloc<dfloat>(len);
+    }
+    deviceMemory<dfloat> o_ytmp_(o_ytmp), o_k_(o_k);
+    auto findAt = [&](const occa::memory &o_state) {
+      occa::memory o_x, o_yy, o_z;
+      if (off) {
+        o_x = o_state.slice(0 * off, n);
+        o_yy = o_state.slice(1 * off, n);
+        o_z = o_state.slice(2 * off, n);
+      }
+      lpm->interpolator().setPoints(o_x, o_yy, o_z);
+      lpm->interpolator().find(lpm_t::VerbosityLevel::None);
+    };
+
+    // the force on the fluid is accumulated with the same stage weights the
+    // particle update uses (1/6, 1/6, 2/3), so that what the fluid receives
+    // is what the parcels lose; fAcc is a prop and migrates with the parcel
+    auto o_fAcc = lpm->getProp("fAcc");
+    auto accumulate = [&](const occa::memory &o_state, double w, bool first) {
+      if (!o_q.isInitialized() || o_q.length() < static_cast<size_t>(nAcc * std::max(off, 1))) {
+        o_q = platform->device.malloc<dfloat>(nAcc * std::max(off, 1));
+      }
+      forceKernel(n, off, lpm->dofId("velocity"), cfg.mu, cfg.rhof, o_state, lpm->getProp("dp"), lpm->getProp("np"), lpm->getInterpField("fluid_velocity"), o_q);
+      platform->linAlg->axpbyMany(n, 3, off, w, o_q, first ? 0.0 : 1.0, o_fAcc);
+    };
+
+    rhs(lpm, o_y, o_k_); // interpolator holds the start-of-step points
+    if (n) {
+      accumulate(o_y, 1.0 / 6.0, true);
+      platform->linAlg->axpbyzMany(n, nd, off, 1.0, o_y, dt, o_k, o_ytmp); // y1
+    }
+    findAt(o_ytmp);
+    rhs(lpm, o_ytmp_, o_k_);
+    if (n) {
+      accumulate(o_ytmp, 1.0 / 6.0, false);
+      platform->linAlg->axpbyMany(n, nd, off, dt, o_k, 1.0, o_ytmp);           // y1 + dt f(y1)
+      platform->linAlg->axpbyMany(n, nd, off, 0.75, o_y, 0.25, o_ytmp);        // y2
+    }
+    findAt(o_ytmp);
+    rhs(lpm, o_ytmp_, o_k_);
+    if (n) {
+      accumulate(o_ytmp, 2.0 / 3.0, false);
+      platform->linAlg->axpbyMany(n, nd, off, dt, o_k, 1.0, o_ytmp);           // y2 + dt f(y2)
+      platform->linAlg->axpbyMany(n, nd, off, 2.0 / 3.0, o_ytmp, 1.0 / 3.0, o_y);
+    }
+    fAccValid = true;
   }
 
   void wrap()
@@ -412,6 +485,10 @@ private:
     particles->interpolator().eval(3, offset, fluid->o_U, poff, o_Up);
     if (n) {
       forceKernel(n, poff, particles->dofId("velocity"), cfg.mu, cfg.rhof, particles->getDOF("x"), particles->getProp("dp"), particles->getProp("np"), o_Up, o_q);
+      if (fAccValid) {
+        // force from the RK stages instead of the end-of-step state
+        o_q.copyFrom(particles->getProp("fAcc"), 3 * poff);
+      }
 
       // after migrate() every particle is local: findpts' element and
       // reference coordinates are in particle order on the host

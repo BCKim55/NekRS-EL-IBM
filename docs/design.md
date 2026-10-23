@@ -96,7 +96,7 @@ in `patches/ppiclF/`.
 | 4 | Fluid fields are interpolated only at the first RK stage (`FinalizeInterp` resets the counter) | particle RK3 is first order in the fluid velocity seen along the path; for tracers it collapses to forward Euler | by design; fine for drag-dominated inertial particles, revisit for tracer-like particles |
 | 5 | `ProjectParticleGrid` tests every particle against every GLL node of every element in its bin range | with one bin per rank, cost ~ particles × all local nodes (13 s/step for 10k particles, 216 N=5 elements) | `0003-projection-element-loop.patch`: skip elements whose bounding box is beyond the cutoff (bit-identical, 6× faster) |
 | 6 | `ProjectParticleGrid` leaves the element loop (`exit`) at the first element whose lowest bin exceeds the particle's | assumes every element on a rank has a node in that rank's bin; false after 0002, so most elements were skipped (79 % of the force lost on 4 ranks) | `0003`: `cycle` instead of `exit` |
-| 8 | `CreateBin` loops forever (`do while (bins_dx < d2chk)` with `n_bins` already 1) when a periodic direction of the domain is shorter than the filter cutoff | a thin periodic slab with a filter wider than its thickness hangs at start-up with no message | not patched: the ghost logic cannot represent more than one periodic image; keep every periodic length ≥ 2 x cutoff (`spray_jet2d` uses Lz = 0.1 with FWHM 0.04) |
+| 8 | `CreateBin` loops forever (`do while (bins_dx < d2chk)` with `n_bins` already 1) when a periodic direction of the domain is shorter than the filter cutoff | a thin periodic slab with a filter wider than its thickness hangs at start-up with no message | `0005-abort-on-short-periodic-length.patch`: abort with `Periodic length < cutoff, dir`; the ghost logic holds one periodic image, so the limit itself stays (keep every periodic length ≥ 2 x cutoff) |
 | 7 | `CreateGhost` drops a ghost when one was already sent to the same rank, unless the new one is periodic | with periodic bins narrower than twice the cutoff a rank needs both the unshifted and the periodic image; the unshifted one was dropped (1e-4 of the projected force on 4 ranks) | `0004-ghost-periodic-images.patch`: deduplicate on (rank, image position) |
 
 Verification, one-way (`rotation_tracer`, frozen solid-body rotation on the unit-sphere
@@ -172,18 +172,22 @@ gravity, 4 ranks:
 
 | | ppiclF path | device path |
 |---|---|---|
-| single droplet vs drag ODE, max error / U0 | 7e-8 (RK3) | 1.5e-5 (RK2, see §4) |
-| momentum budget at t = 2 (max over the run) | +8.6e-4 (2.8e-3) | -8.9e-4 (3.2e-3) |
+| single droplet vs drag ODE, max error / U0 | 7e-8 (RK3) | 7e-8 (SSP-RK3, see §4) |
+| momentum budget at t = 2 (max over the run) | +8.6e-4 (2.8e-3) | +9.4e-4 (2.8e-3) |
 | fluid budget `P_gas - int FU` | 1.6e-4 | 1.6e-4 |
-| P_gas, P_parcels at t = 2 | 1.0720e-2, 2.9314e-2 | 1.0752e-2, 2.9212e-2 |
-| centreline gas u_x, max | 0.8333 | 0.8323 |
-| centreline difference | — | max 0.0145, rms 0.0030 |
+| P_gas, P_parcels at t = 2 | 1.0720e-2, 2.9314e-2 | 1.0806e-2, 2.9232e-2 |
+| centreline gas u_x, max | 0.8333 | 0.8336 |
+| centreline difference | — | max 0.0055, rms 0.0013 |
 | step time | 1.25 s (10 k parcels) | 0.19 s |
 
 The two implementations (ppiclF's bins, ghosts and Gaussian sum vs `lpm_t`,
-L2 projection and diffusion filter) agree to 0.3 % in momenta and 1.7 % in
+L2 projection and diffusion filter) agree to 0.8 % in momenta and 0.7 % in
 the centreline velocity at the jet head, with the momentum budget closed to
-1e-3 of the injected momentum in both. At dt = 5e-3 both runs blew up at
+1e-3 of the injected momentum in both. With lpm_t's RK2 and the end-of-step
+force the device path gave 1.5e-5 on the droplet check and a centreline
+difference of 0.0145; the RK-weighted force brought the `settling_gpu`
+momentum drift from -5.6e-3 to -1.2e-3 of the gravity impulse (ppiclF path:
+-1.0e-3). At dt = 5e-3 both runs blew up at
 t = 0.5 when the induced gas velocity (0.83 u_jet) pushed the gas CFL past 1:
 nekRS's own advection limit, not the coupling.
 
@@ -254,9 +258,15 @@ stages instead of the stage state `o_ytmp_` (the positions for the fluid
 interpolation *are* the stage positions, only the state handed to the RHS is
 stale). For a velocity-dependent RHS the scheme is then first order: in the
 single-droplet check of `spray_jet2d` the velocity error was 1.9e-3 U0 with
-"RK3" and 1.5e-5 U0 with RK2, which is implemented correctly. `elgpu` uses
-RK2 (`Config::rkOrder = 2`); the ppiclF path's own RK3 gives 7e-8 U0 on the
-same check.
+"RK3" and 1.5e-5 U0 with RK2, which is implemented correctly.
+`patches/nekRS/0001-lpm-rk-stage-state.patch` is the upstream fix (not
+applied to the submodule or the installed nekRS). `elgpu` does not depend on
+it: it integrates with its own SSP-RK3 through `lpm_t::setUserODESolver`
+(`Coupling::ssprk3`, stage positions handed to the interpolator), which gives
+7e-8 U0 on the same check, and accumulates the force on the fluid with the
+same stage weights (prop `fAcc`, migrates with the parcel), so the fluid
+receives what the parcels lose. `Config::rkOrder = 1, 2` fall back to
+lpm_t's own integrators with the end-of-step force.
 
 ### Not there yet
 
@@ -266,9 +276,7 @@ contact distance of a rank's element boundary), IBM markers (the same deposit
 kernel spreads marker forces; the body reduction is a segmented sum over
 marker ids), and walls. The Gaussian filter would be cheaper as one implicit
 Helmholtz solve with nekRS's elliptic solver than as ~60 explicit steps per
-field (7 fields), and the momentum exchange could be made consistent to
-second order by taking the fluid force as the RK-weighted particle drag
-instead of the end-of-step value.
+field (7 fields).
 
 ### Verification (`settling_gpu`)
 
@@ -279,10 +287,8 @@ Against the ppiclF path at t = 0.2: fluid momentum -5.666e-2 vs -5.631e-2
 vs -0.3410 (0.2 %); imposed divergence RMS 1.98e-4 vs 2.01e-4 and the
 solver's divergence error 5.9e-5 vs 6.0e-5. Projection conservation is
 round-off (3e-16) instead of the Gaussian truncation (4.6e-4). The global
-momentum drift is -5.6e-3 of the gravity impulse (ppiclF path: -1.0e-3): the
-force on the fluid is the end-of-step drag while the particle took the
-RK-weighted drag, an O(dt) mismatch that the ppiclF path happens to cancel
-better; the remedy is in "Not there yet".
+momentum drift is -1.2e-3 of the gravity impulse (ppiclF path: -1.0e-3) with
+the RK-weighted force on the fluid; with the end-of-step force it was -5.6e-3.
 
 ### Where the time goes
 

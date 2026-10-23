@@ -33,11 +33,12 @@ struct JetParams {
 // stream is continuous
 struct JetInjector {
   const JetParams &p;
-  double lz, yc, dt;
+  double lz, yc;
   std::mt19937_64 gen{2026};
   std::uniform_real_distribution<double> uni{0.0, 1.0};
 
-  void parcels(std::vector<double> &x, std::vector<double> &v, std::vector<double> &d, std::vector<double> &rho, std::vector<double> &w)
+  // dt: the step just taken, so that the injected mass follows a variable dt
+  void parcels(double dt, std::vector<double> &x, std::vector<double> &v, std::vector<double> &d, std::vector<double> &rho, std::vector<double> &w)
   {
     x.clear(), v.clear(), d.clear(), rho.clear(), w.clear();
     if (platform->comm.mpiRank() != 0) {

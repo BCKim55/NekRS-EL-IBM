@@ -1,0 +1,47 @@
+--- a/src/core/plugins/lpm.cpp	2026-10-23 11:07:47
++++ b/src/core/plugins/lpm.cpp	2026-10-23 11:07:47
+@@ -758,7 +758,8 @@
+   extrapolateFluidState(time + 0.5 * dt[0]);
+ 
+   platform->timer.tic(timerName + "integrate::userRHS");
+-  userRHS_(this, time + 0.5 * dt[0], o_y_, userdata_, o_k2_);
++  deviceMemory<dfloat> o_ytmp_(o_ytmp);
++  userRHS_(this, time + 0.5 * dt[0], o_ytmp_, userdata_, o_k2_);
+   platform->timer.toc(timerName + "integrate::userRHS");
+ 
+   // o_ytmp = o_y - dt[0] * o_k1 + 2 * dt[0] * o_k2
+@@ -773,7 +774,6 @@
+   extrapolateFluidState(time + dt[0]);
+ 
+   platform->timer.tic(timerName + "integrate::userRHS");
+-  deviceMemory<dfloat> o_ytmp_(o_ytmp);
+   userRHS_(this, time + dt[0], o_ytmp_, userdata_, o_k3_);
+   platform->timer.toc(timerName + "integrate::userRHS");
+ 
+@@ -816,7 +816,8 @@
+   extrapolateFluidState(time + 0.5 * dt[0]);
+ 
+   platform->timer.tic(timerName + "integrate::userRHS");
+-  userRHS_(this, time + 0.5 * dt[0], o_y_, userdata_, o_k2_);
++  deviceMemory<dfloat> o_ytmp_(o_ytmp);
++  userRHS_(this, time + 0.5 * dt[0], o_ytmp_, userdata_, o_k2_);
+   platform->timer.toc(timerName + "integrate::userRHS");
+ 
+   // o_ytmp = o_y + dt[0]/2 * o_k2
+@@ -827,7 +828,7 @@
+   this->find(o_ytmp);
+ 
+   platform->timer.tic(timerName + "integrate::userRHS");
+-  userRHS_(this, time + 0.5 * dt[0], o_y_, userdata_, o_k3_);
++  userRHS_(this, time + 0.5 * dt[0], o_ytmp_, userdata_, o_k3_);
+   platform->timer.toc(timerName + "integrate::userRHS");
+ 
+   // o_ytmp = o_y + dt[0] * o_k3
+@@ -841,7 +842,6 @@
+   extrapolateFluidState(time + dt[0]);
+ 
+   platform->timer.tic(timerName + "integrate::userRHS");
+-  deviceMemory<dfloat> o_ytmp_(o_ytmp);
+   userRHS_(this, time + dt[0], o_ytmp_, userdata_, o_k4_);
+   platform->timer.toc(timerName + "integrate::userRHS");
+ 

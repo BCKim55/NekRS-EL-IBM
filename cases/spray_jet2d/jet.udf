@@ -50,7 +50,7 @@ void UDF_Setup()
 
   double dt;
   platform->options.getArgs("DT", dt); // nrs->dt[0] is not set yet in UDF_Setup
-  injector = new JetInjector{jp, hi[2] - lo[2], 0.5 * (lo[1] + hi[1]), dt};
+  injector = new JetInjector{jp, hi[2] - lo[2], 0.5 * (lo[1] + hi[1])};
 
   // two identical droplets: ppiclF's bins need a nonzero particle extent
   // in the non-periodic direction
@@ -78,7 +78,7 @@ void UDF_ExecuteStep(double time, int tstep)
     sourceImpulse += dt * sourceX;
     if (jp.parcelsPerStep > 0) {
       std::vector<double> x, v, d, rho, w;
-      injector->parcels(x, v, d, rho, w);
+      injector->parcels(dt, x, v, d, rho, w);
       std::vector<elibm::ElParticle> list(d.size());
       for (size_t i = 0; i < d.size(); i++) {
         list[i].x = {x[3 * i], x[3 * i + 1], x[3 * i + 2]};

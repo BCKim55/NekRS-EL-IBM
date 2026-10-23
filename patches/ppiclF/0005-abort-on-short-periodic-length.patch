@@ -1,0 +1,16 @@
+--- a/source/ppiclf_comm.f	2026-10-23 11:07:47
++++ b/source/ppiclf_comm.f	2026-10-23 11:08:27
+@@ -198,6 +198,13 @@
+          ! Make sure exit_2 is not violated by user input
+          if (ppiclf_bins_dx(i) .lt. ppiclf_d2chk(1)) then
+             do while (ppiclf_bins_dx(i) .lt. ppiclf_d2chk(1))
++               ! a single bin narrower than the cutoff means the (periodic)
++               ! domain is shorter than the filter/neighbor distance; the
++               ! ghost logic holds one periodic image, so stop here instead
++               ! of looping forever
++               if (ppiclf_n_bins(i) .eq. 1)
++     >            call ppiclf_exittr('Periodic length < cutoff, dir$'
++     >                              ,ppiclf_bins_dx(i),i)
+                ppiclf_n_bins(i) = max(1, ppiclf_n_bins(i)-1)
+                ppiclf_bins_dx(i) = (ppiclf_binb(2*(i-1)+2) -
+      >                              ppiclf_binb(2*(i-1)+1)  ) / 
