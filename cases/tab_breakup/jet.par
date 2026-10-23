@@ -1,0 +1,32 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+numSteps = 600
+dt = 2e-3
+timeStepper = tombo2
+checkpointInterval = 0
+
+[MESH]
+file = "jet.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-8
+
+[FLUID VELOCITY]
+boundaryTypeMap = zeroDirichletN/zeroNeumann
+residualTol = 1e-10
+rho = 1.0
+# low gas viscosity: Re_p 40-160, so the droplets keep most of their
+# velocity (and Weber number) over the breakup time
+viscosity = 5e-5
+
+[CASEDATA]
+# one-way: droplets of diameter dp released into quiescent gas with the
+# speed that gives each Weber number We = rho_g U^2 dp / sigma
+dp = 0.002
+rhop = 1000.0
+sigma = 1e-4
+mu_liquid = 1e-3
+we_list = 10, 12, 15, 18, 25, 35, 50, 80, 120, 200, 300

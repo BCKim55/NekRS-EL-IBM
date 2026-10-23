@@ -4,18 +4,32 @@
 #define ELGPU_NQMAX 16
 #define ELGPU_PI 3.14159265358979323846
 
-// Schiller-Naumann drag coefficient times |u - v|: f_d = fd * (u - v)
-inline dfloat elgpuDragCoeff(const dfloat mu, const dfloat rhof, const dfloat dp, const dfloat urMag)
+// Schiller-Naumann drag, f_d = fd * (u - v), with the TAB dynamic-drag
+// factor (1 + 2.632 y) of Liu, Mather & Reitz (y = 0: sphere, 1: disc)
+inline dfloat elgpuDragCoeff(const dfloat mu, const dfloat rhof, const dfloat dp, const dfloat urMag, const dfloat ytab)
 {
   const dfloat re = urMag * dp * rhof / mu;
-  return 3.0 * ELGPU_PI * mu * dp * (1.0 + 0.15 * pow(re, 0.687));
+  return 3.0 * ELGPU_PI * mu * dp * (1.0 + 0.15 * pow(re, 0.687)) * (1.0 + 2.632 * ytab);
 }
 
+// TAB constants (O'Rourke & Amsden 1987)
+#define TAB_CF (1.0 / 3.0)
+#define TAB_CB 0.5
+#define TAB_CK 8.0
+#define TAB_CD 5.0
+#define TAB_K (10.0 / 3.0)
+
+// tabId < 0: rigid droplets. Otherwise y[tabId], y[tabId+1] are the TAB
+// distortion y and its rate, with the oscillator
+//   y'' = (CF/CB) rho_g |u_r|^2 / (rho_l r^2) - CK sigma / (rho_l r^3) y - CD mu_l / (rho_l r^2) y'
 @kernel void elgpuRHS(const dlong N,
                       const dlong offset,
                       const int vId,
+                      const int tabId,
                       const dfloat mu,
                       const dfloat rhof,
+                      const dfloat sigma,
+                      const dfloat muL,
                       const dfloat gx,
                       const dfloat gy,
                       const dfloat gz,
@@ -32,9 +46,12 @@ inline dfloat elgpuDragCoeff(const dfloat mu, const dfloat rhof, const dfloat dp
     const dfloat urx = U[n + 0 * offset] - vx;
     const dfloat ury = U[n + 1 * offset] - vy;
     const dfloat urz = U[n + 2 * offset] - vz;
+    const dfloat ur2 = urx * urx + ury * ury + urz * urz;
     const dfloat d = dp[n];
+    const dfloat r = 0.5 * d;
     const dfloat m = rhop[n] * ELGPU_PI / 6.0 * d * d * d;
-    const dfloat fd = elgpuDragCoeff(mu, rhof, d, sqrt(urx * urx + ury * ury + urz * urz));
+    const dfloat ytab = (tabId >= 0) ? fmin(fmax(y[n + tabId * offset], 0.0), 1.0) : 0.0;
+    const dfloat fd = elgpuDragCoeff(mu, rhof, d, sqrt(ur2), ytab);
 
     ydot[n + 0 * offset] = vx;
     ydot[n + 1 * offset] = vy;
@@ -42,6 +59,47 @@ inline dfloat elgpuDragCoeff(const dfloat mu, const dfloat rhof, const dfloat dp
     ydot[n + (vId + 0) * offset] = fd * urx / m + gx;
     ydot[n + (vId + 1) * offset] = fd * ury / m + gy;
     ydot[n + (vId + 2) * offset] = fd * urz / m + gz;
+    if (tabId >= 0) {
+      const dfloat yt = y[n + tabId * offset];
+      const dfloat yd = y[n + (tabId + 1) * offset];
+      ydot[n + tabId * offset] = yd;
+      ydot[n + (tabId + 1) * offset] = (TAB_CF / TAB_CB) * rhof * ur2 / (rhop[n] * r * r) -
+                                       TAB_CK * sigma / (rhop[n] * r * r * r) * yt -
+                                       TAB_CD * muL / (rhop[n] * r * r) * yd;
+    }
+  }
+}
+
+// TAB breakup, in place: a parcel whose distortion passed y = 1 becomes a
+// parcel of more, smaller droplets (Sauter radius of O'Rourke & Amsden's
+// energy balance), the distortion is reset and the liquid volume kept.
+// tbreak records the first breakup time of the parcel (-1: none yet).
+@kernel void elgpuBreakup(const dlong N,
+                          const dlong offset,
+                          const int tabId,
+                          const dfloat sigma,
+                          const dfloat time,
+                          @ restrict dfloat *y,
+                          @ restrict const dfloat *rhop,
+                          @ restrict dfloat *dp,
+                          @ restrict dfloat *np,
+                          @ restrict dfloat *tbreak)
+{
+  for (dlong n = 0; n < N; ++n; @tile(256, @outer, @inner)) {
+    const dfloat yt = y[n + tabId * offset];
+    if (yt > 1.0) {
+      const dfloat yd = y[n + (tabId + 1) * offset];
+      const dfloat r = 0.5 * dp[n];
+      const dfloat ratio = 1.0 + 8.0 * TAB_K / 20.0 + rhop[n] * r * r * r / sigma * yd * yd * (6.0 * TAB_K - 5.0) / 120.0;
+      const dfloat rNew = r / ratio;
+      np[n] *= (r / rNew) * (r / rNew) * (r / rNew);
+      dp[n] = 2.0 * rNew;
+      y[n + tabId * offset] = 0.0;
+      y[n + (tabId + 1) * offset] = 0.0;
+      if (tbreak[n] < 0.0) {
+        tbreak[n] = time;
+      }
+    }
   }
 }
 
@@ -50,6 +108,7 @@ inline dfloat elgpuDragCoeff(const dfloat mu, const dfloat rhof, const dfloat dp
 @kernel void elgpuForce(const dlong N,
                         const dlong offset,
                         const int vId,
+                        const int tabId,
                         const dfloat mu,
                         const dfloat rhof,
                         @ restrict const dfloat *y,
@@ -67,7 +126,8 @@ inline dfloat elgpuDragCoeff(const dfloat mu, const dfloat rhof, const dfloat dp
     const dfloat urz = U[n + 2 * offset] - vz;
     const dfloat d = dp[n];
     const dfloat vol = np[n] * ELGPU_PI / 6.0 * d * d * d;
-    const dfloat fd = np[n] * elgpuDragCoeff(mu, rhof, d, sqrt(urx * urx + ury * ury + urz * urz));
+    const dfloat ytab = (tabId >= 0) ? fmin(fmax(y[n + tabId * offset], 0.0), 1.0) : 0.0;
+    const dfloat fd = np[n] * elgpuDragCoeff(mu, rhof, d, sqrt(urx * urx + ury * ury + urz * urz), ytab);
     q[n + 0 * offset] = -fd * urx;
     q[n + 1 * offset] = -fd * ury;
     q[n + 2 * offset] = -fd * urz;

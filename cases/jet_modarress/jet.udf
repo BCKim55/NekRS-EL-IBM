@@ -1,0 +1,120 @@
+// Round particle-laden jet of Modarress, Tan & Elghobashi (1984), device
+// particle path, two-way, no breakup (solid glass beads).
+//
+// Re_D = 13 300: the gas is turbulent and the mesh/N here (40 x 24 x 24,
+// N = 5, 10^6 points) is a coarse LES-grade setup for a GPU node, not for a
+// laptop. The case is complete; this repo only ran it for a few steps on CPU
+// (smoke test). Validation data to compare with (digitise from the paper or
+// from Apte et al. 2003 / Lain & Sommerfeld): centreline gas and particle
+// velocity decay U_c/U_0 vs x/D for mass loadings 0.32 and 0.85, and the
+// radial profiles at x/D = 10 and 20.
+
+#include "elgpu.hpp"
+
+struct Params {
+  double uCo, smooth, dp, rhop, loading, filterWidth;
+  int parcelsPerStep, reportInterval, qtl;
+} jp;
+static elgpu::Coupling *coupling = nullptr; // never deleted (MPI resources)
+static std::mt19937_64 gen{2026};
+static double injected = 0;
+
+#ifdef __okl__
+
+void udfDirichlet(bcData *bc)
+{
+  if (isField("fluid velocity")) {
+    const dfloat r = sqrt(bc->y * bc->y + bc->z * bc->z);
+    bc->uxFluid = p_uCo + (1.0 - p_uCo) * 0.5 * (1.0 - tanh((r - 0.5) / p_smooth));
+    bc->uyFluid = 0.0;
+    bc->uzFluid = 0.0;
+  }
+  if (isField("fluid pressure")) {
+    const dfloat iU0delta = 10.0;
+    const dfloat un = bc->uxFluid * bc->nx + bc->uyFluid * bc->ny + bc->uzFluid * bc->nz;
+    const dfloat s0 = 0.5 * (1.0 - tanh(un * iU0delta));
+    bc->pFluid = -0.5 * (bc->uxFluid * bc->uxFluid + bc->uyFluid * bc->uyFluid + bc->uzFluid * bc->uzFluid) * s0;
+  }
+}
+
+#endif
+
+void UDF_LoadKernels(deviceKernelProperties &kernelInfo)
+{
+  elgpu::registerKernels(kernelInfo);
+  platform->par->extract("casedata", "u_co", jp.uCo);
+  platform->par->extract("casedata", "nozzle_smooth", jp.smooth);
+  kernelInfo.define("p_uCo") = jp.uCo;
+  kernelInfo.define("p_smooth") = jp.smooth;
+}
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  auto get = [](const char *k, auto &v) { platform->par->extract("casedata", k, v); };
+  get("u_co", jp.uCo);
+  get("nozzle_smooth", jp.smooth);
+  get("dp", jp.dp);
+  get("rhop", jp.rhop);
+  get("mass_loading", jp.loading);
+  get("parcels_per_step", jp.parcelsPerStep);
+  get("filter_width", jp.filterWidth);
+  get("qtl", jp.qtl);
+  get("report_interval", jp.reportInterval);
+}
+
+void UDF_Setup()
+{
+  auto mesh = nrs->meshV;
+  const auto offset = nrs->fluid->fieldOffset;
+  std::vector<dfloat> U(3 * offset, 0.0);
+  std::fill(U.begin(), U.begin() + mesh->Nlocal, jp.uCo);
+  nrs->fluid->o_U.copyFrom(U.data(), 3 * offset);
+
+  elgpu::Config cfg;
+  platform->options.getArgs("FLUID DENSITY", cfg.rhof);
+  platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+  cfg.periodic = {false, false, false};
+  cfg.filterWidth = jp.filterWidth;
+  cfg.qtl = jp.qtl != 0;
+  coupling = new elgpu::Coupling(nrs, cfg);
+  double t0;
+  platform->options.getArgs("START TIME", t0);
+  coupling->initialize({}, {}, {}, {}, t0, {});
+  if (platform->comm.mpiRank() == 0) {
+    const double tau = jp.rhop * jp.dp * jp.dp / (18 * cfg.mu);
+    printf("modarress: Re_D %.0f  loading %.2f  tau_p %.3f D/U_0  St(D/U0) %.2f\n", 1.0 / cfg.mu, jp.loading, tau, tau);
+  }
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  const double dt = nrs->dt[0];
+  if (tstep > 0) {
+    // parcels uniformly over the nozzle disc at the jet speed; the mass
+    // flow is loading x (rho_gas U_0 pi D^2/4), nondimensional rho_gas = 1
+    std::vector<double> x, v, d, rho, w;
+    if (platform->comm.mpiRank() == 0) {
+      std::uniform_real_distribution<double> uni(0.0, 1.0);
+      const double massPerStep = jp.loading * M_PI / 4.0 * 1.0 * dt;
+      const double np = massPerStep / (jp.rhop * M_PI / 6.0 * jp.dp * jp.dp * jp.dp) / jp.parcelsPerStep;
+      for (int i = 0; i < jp.parcelsPerStep; i++) {
+        const double r = 0.5 * std::sqrt(uni(gen)), th = 2 * M_PI * uni(gen);
+        x.insert(x.end(), {uni(gen) * dt, r * std::cos(th), r * std::sin(th)});
+        v.insert(v.end(), {1.0, 0.0, 0.0});
+        d.push_back(jp.dp);
+        rho.push_back(jp.rhop);
+        w.push_back(np);
+      }
+      injected += massPerStep;
+    }
+    coupling->inject(x, v, d, rho, w);
+  }
+  coupling->step(time, tstep);
+  if (tstep % jp.reportInterval == 0 || nrs->lastStep) {
+    const auto tot = coupling->totals();
+    if (platform->comm.mpiRank() == 0) {
+      printf("modarress: step %d  t %.3f  nparcel %lld  Pgas %.4e  Pparcel %.4e  injected mass %.4e\n",
+             tstep, time, tot.nEl, tot.fluidMomentum[0], tot.elMomentum[0], injected);
+    }
+  }
+}

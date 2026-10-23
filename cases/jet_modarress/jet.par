@@ -1,0 +1,41 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+# production: ~ 60 D / U_0 of flow time after the start-up transient
+numSteps = 20
+dt = 2e-3
+timeStepper = tombo2
+checkpointInterval = 0
+
+[MESH]
+# 40 x 24 x 24 elements on [0,20] x [-4,4] x [-4,4] (D = 1)
+file = "jet.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-6
+
+[FLUID VELOCITY]
+# 1: inflow (nozzle + coflow), 2: outflow, 3: symmetry sides
+boundaryTypeMap = udfDirichlet, zeroNeumann, zeroDirichletN/zeroNeumann
+residualTol = 1e-8
+rho = 1.0
+# Re_D = U_0 D / nu = 13300 (Modarress, Tan & Elghobashi 1984)
+viscosity = 7.5188e-5
+
+[CASEDATA]
+# nondimensional: D = 1, U_0 = 1, rho_gas = 1
+u_co = 0.03
+# top-hat nozzle profile smoothed over 0.05 D
+nozzle_smooth = 0.05
+# glass beads: 50 um in a 20 mm nozzle, rho_p / rho_gas = 2990 / 1.2
+dp = 0.0025
+rhop = 2492.0
+# particle mass loading at the nozzle (0.32 or 0.85)
+mass_loading = 0.32
+# parcels created per step over the nozzle area
+parcels_per_step = 50
+filter_width = 0.15
+qtl = 0
+report_interval = 10

@@ -268,6 +268,50 @@ same stage weights (prop `fAcc`, migrates with the parcel), so the fluid
 receives what the parcels lose. `Config::rkOrder = 1, 2` fall back to
 lpm_t's own integrators with the end-of-step force.
 
+### Second `lpm_t` finding: variable numbering
+
+`addVariable` / `addProp` store `dofIds[name] = dofIds.size()` (the variable's
+position in the list) while `getDOF` / `getProp` slice at `id * fieldOffset`
+(a field index). The two agree only while every earlier variable has one
+component, so a variable registered after a multi-component one is laid over
+the wrong fields: a 2-component "tab" registered after the 3-component
+"velocity" landed on velocity's y and z. `patches/nekRS/0002-lpm-dof-field-
+index.patch` makes the id the first-field index. This repo works around it by
+registering single-component variables first and the one multi-component
+variable (velocity, fAcc) last.
+
+### TAB droplet deformation and breakup (`cases/tab_breakup`)
+
+`Config::tab` adds the TAB distortion y and its rate as particle DOFs
+(O'Rourke & Amsden 1987: CF = 1/3, CB = 1/2, CK = 8, CD = 5), integrated
+with the particle SSP-RK3, the dynamic drag `C_d (1 + 2.632 y)` of Liu,
+Mather & Reitz, and in-place breakup when y > 1: the parcel becomes
+`N_p (r/r_32)^3` droplets of the Sauter radius from the TAB energy balance,
+y is reset, the liquid volume kept, no velocity kick. Verification on
+droplets released into quiescent gas at We = 10–300 (`d = 0.002`,
+`sigma = 1e-4`, `rho_l = 1000`, `mu_l = 1e-3`, one-way):
+
+- the first three steps of y, y' and v match an independent Python SSP-RK3
+  of the same ODE to 6 digits;
+- the We = 10 droplet oscillates with period 0.224/0.222/0.224 against the
+  analytic damped period 0.2230, about `y_eq = We/24`, first peak 1.61 y_eq
+  (damped analytic 1.76; We decays through the drag);
+- no breakup at We = 10, 12, 15 (TAB's critical We is 12 for an undamped
+  droplet; liquid damping, Oh = 0.07, moves it above 15); breakup at We ≥ 18
+  with `T = t_b U sqrt(rho_g/rho_l)/d` = 1.17, 1.06, 1.00, 1.00, 0.95, 0.93 for
+  We = 18, 25, 35, 50, 80, 120 against the Pilch & Erdman (1987) *initiation*
+  time `1.9 (We-12)^-1/4` = 1.21, 1.00, 0.87, 0.77, 0.66, 0.59: TAB's y = 1
+  event is the onset of breakup and sits on that curve at low We, 1.6x above
+  it at We = 120 (TAB saturates where the correlation keeps falling); the
+  *total* breakup time is 4–5x longer, as expected;
+- child size `d_32/d` = 0.40 (We = 18) to 0.10 (We = 120).
+- The We = 200 and 300 droplets broke repeatedly within a few steps and
+  were lost: each breakup leaves children whose own We is still above 12,
+  and after three cascades `tau_p` of the children falls below dt, the
+  explicit drag goes unstable and the parcel is deleted as unfound. After
+  breakup dt must resolve the children's response time, or the drag needs
+  an implicit (exponential) update — not done yet.
+
 ### Not there yet
 
 Particle–particle contact (needs a device cell list: counting sort by cell,

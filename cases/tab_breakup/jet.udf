@@ -1,0 +1,104 @@
+// TAB validation: droplets released at the speed that gives each Weber
+// number, one-way, quiescent gas. Prints the distortion history of the
+// first droplet (We < 12: oscillation without breakup, for the frequency
+// check) and, at the end, the first breakup time of every droplet for the
+// comparison with the Pilch & Erdman (1987) correlation
+// (scripts/tab_reference.py).
+
+#include "elgpu.hpp"
+
+static double dp, rhop, sigma, muL;
+static std::vector<double> weList;
+static elgpu::Coupling *coupling = nullptr; // never deleted (MPI resources)
+
+#ifdef __okl__
+
+#endif
+
+void UDF_LoadKernels(deviceKernelProperties &kernelInfo)
+{
+  elgpu::registerKernels(kernelInfo);
+}
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  platform->par->extract("casedata", "dp", dp);
+  platform->par->extract("casedata", "rhop", rhop);
+  platform->par->extract("casedata", "sigma", sigma);
+  platform->par->extract("casedata", "mu_liquid", muL);
+  std::string list;
+  platform->par->extract("casedata", "we_list", list);
+  for (auto &c : list) {
+    if (c == ',') {
+      c = ' ';
+    }
+  }
+  std::istringstream ss(list);
+  double v;
+  while (ss >> v) {
+    weList.push_back(v);
+  }
+}
+
+void UDF_Setup()
+{
+  elgpu::Config cfg;
+  platform->options.getArgs("FLUID DENSITY", cfg.rhof);
+  platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+  cfg.periodic = {true, false, true};
+  cfg.filterWidth = 0.04;
+  cfg.qtl = false;
+  cfg.twoWay = false;
+  cfg.tab = true;
+  cfg.sigma = sigma;
+  cfg.muL = muL;
+  coupling = new elgpu::Coupling(nrs, cfg);
+  const auto lo = coupling->domainLo();
+  const auto hi = coupling->domainHi();
+
+  std::vector<double> x, v, d, r;
+  if (platform->comm.mpiRank() == 0) {
+    for (size_t i = 0; i < weList.size(); i++) {
+      const double U = std::sqrt(weList[i] * sigma / (cfg.rhof * dp));
+      x.insert(x.end(), {0.1, lo[1] + (i + 1.0) / (weList.size() + 1.0) * (hi[1] - lo[1]), 0.5 * (lo[2] + hi[2])});
+      v.insert(v.end(), {U, 0.0, 0.0});
+      d.push_back(dp);
+      r.push_back(rhop);
+    }
+  }
+  double t0;
+  platform->options.getArgs("START TIME", t0);
+  coupling->initialize(x, v, d, r, t0);
+  if (platform->comm.mpiRank() == 0) {
+    const double rr = 0.5 * dp;
+    printf("tab: omega %.3f  damping %.3f  We_crit 12\n",
+           std::sqrt(8 * sigma / (rhop * rr * rr * rr)), 5 * muL / (rhop * rr * rr));
+  }
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  coupling->step(time, tstep);
+  auto &lpm = coupling->lpm();
+  const int n = lpm.numParticles();
+  const int off = lpm.fieldOffset();
+  if (n == 0) {
+    return;
+  }
+  std::vector<dfloat> gid(off), tab(2 * off), vx(off), dpp(off), np(off), tb(off);
+  lpm.getProp("gid").copyTo(gid.data(), n);
+  lpm.getDOF("taby").copyTo(tab.data(), n);
+  lpm.getDOF("tabyd").copyTo(tab.data() + off, n);
+  lpm.getDOF("velocity").copyTo(vx.data(), n);
+  lpm.getProp("dp").copyTo(dpp.data(), n);
+  lpm.getProp("np").copyTo(np.data(), n);
+  lpm.getProp("tbreak").copyTo(tb.data(), n);
+  for (int i = 0; i < n; i++) {
+    if (std::lround(gid[i]) == 0) {
+      printf("tab: %d %.6e %.8e %.8e %.6e\n", tstep, time, tab[i], tab[i + off], vx[i]);
+    }
+    if (nrs->lastStep) {
+      printf("tbreak: %d %.6e %.6e %.6e %.6e %.6e\n", static_cast<int>(std::lround(gid[i])), weList[std::lround(gid[i])], tb[i], vx[i], dpp[i], np[i]);
+    }
+  }
+}

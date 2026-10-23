@@ -1,0 +1,43 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+numSteps = 4000
+dt = 5e-3
+timeStepper = tombo2
+checkpointInterval = 0
+
+[MESH]
+# 40 x 32 x 1 elements on [0,2] x [-0.8,0.8] x [0,0.1]
+file = "jet.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-8
+
+[FLUID VELOCITY]
+# 1: inflow (coflow u_co), 2: outflow, 3: symmetry
+boundaryTypeMap = udfDirichlet, zeroNeumann, zeroDirichletN/zeroNeumann
+residualTol = 1e-10
+rho = 1.0
+viscosity = 5e-4
+
+[CASEDATA]
+u_co = 0.05
+# slot nozzle at x = x0, y = 0, full z
+u_jet = 1.0
+w_slot = 0.02
+x_nozzle = 0.5
+# dilute: kinematic momentum flux J = u_jet^2 w phi_inj (rho_l/rho_g) = 0.02
+phi_inj = 0.001
+# small droplets (tau_p = 0.028): the parcels hand their momentum to the gas
+# within ~0.05 of the nozzle, so the gas sees a localised momentum source
+dp = 0.0005
+rhop = 1000.0
+parcels_per_step = 10
+filter_width = 0.04
+qtl = 0
+report_interval = 100
+# 1: no parcels; the same momentum flux as a fixed Gaussian body force
+#    (sigma = 2 w_slot) at the nozzle -> the nekRS-only reference
+source_only = 0

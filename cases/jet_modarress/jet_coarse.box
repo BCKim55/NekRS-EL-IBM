@@ -1,0 +1,14 @@
+base.rea
+-3                     spatial dimension  ( < 0 --> generate .rea/.re2 pair)
+1                      number of fields
+#=======================================================================
+# COARSE smoke-test mesh (16 x 10 x 10) for the round particle-laden jet (Modarress et al. 1984): box 20D x 8D x 8D,
+# inflow x = 0 (nozzle profile in the UDF), outflow x = 20D, symmetry sides.
+# Lengths in nozzle diameters D.
+#=======================================================================
+Box
+-16  -10  -10                                        nelx,nely,nelz
+0 20 1.                                              x0,x1,ratio
+-4 4 1.                                              y0,y1,ratio
+-4 4 1.                                              z0,z1,ratio
+v  ,O  ,SYM,SYM,SYM,SYM                              bc's  (3 chars each!)

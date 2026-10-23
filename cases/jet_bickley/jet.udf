@@ -1,0 +1,157 @@
+// Laminar planar jet in an open slab, device particle path (src/elgpu.hpp).
+//
+// Small droplets injected from a slot give up their momentum to the gas
+// within a short distance, so far from the nozzle the gas must follow the
+// Bickley similarity solution for a plane laminar jet of kinematic momentum
+// flux J (Schlichting): u_c = 0.4543 (J^2 / (nu x))^(1/3),
+// u = u_c sech^2(0.2752 (J / (nu^2 x^2))^(1/3) y). With source_only = 1 the
+// parcels are replaced by a fixed Gaussian body force of the same J, which
+// gives the nekRS-only reference. A weak coflow u_co feeds the entrainment
+// through the inflow plane; the comparison uses the excess velocity.
+// scripts/jet_bickley.py compares field_final.csv of both runs with Bickley.
+
+#include "elgpu.hpp"
+#include "jet_common.hpp"
+
+static JetParams jp;
+static JetInjector *injector = nullptr;
+static elgpu::Coupling *coupling = nullptr; // never deleted (MPI resources)
+static double uCo, injected = 0;
+static int sourceOnly = 0;
+static deviceMemory<dfloat> o_bodyForce;
+
+#ifdef __okl__
+
+void udfDirichlet(bcData *bc)
+{
+  if (isField("fluid velocity")) {
+    bc->uxFluid = p_uCo;
+    bc->uyFluid = 0.0;
+    bc->uzFluid = 0.0;
+  }
+  if (isField("fluid pressure")) {
+    // outflow: dynamic-pressure stabilisation against backflow (as hemi)
+    const dfloat iU0delta = 10.0;
+    const dfloat un = bc->uxFluid * bc->nx + bc->uyFluid * bc->ny + bc->uzFluid * bc->nz;
+    const dfloat s0 = 0.5 * (1.0 - tanh(un * iU0delta));
+    bc->pFluid = -0.5 * (bc->uxFluid * bc->uxFluid + bc->uyFluid * bc->uyFluid + bc->uzFluid * bc->uzFluid) * s0;
+  }
+}
+
+#endif
+
+static void dumpParcels(const std::string &name)
+{
+  auto &lpm = coupling->lpm();
+  const int n = lpm.numParticles(), off = lpm.fieldOffset();
+  std::vector<dfloat> x(std::max(off, 1)), y(std::max(off, 1)), z(std::max(off, 1)), v(std::max(off, 1));
+  if (n) {
+    lpm.getDOF("x").copyTo(x.data(), n);
+    lpm.getDOF("y").copyTo(y.data(), n);
+    lpm.getDOF("z").copyTo(z.data(), n);
+    lpm.getDOF("velocity").copyTo(v.data(), n);
+  }
+  std::vector<double> rows;
+  for (int i = 0; i < n; i++) {
+    rows.insert(rows.end(), {x[i], y[i], z[i], v[i]});
+  }
+  gatherRows(rows, 4, name);
+}
+
+void UDF_LoadKernels(deviceKernelProperties &kernelInfo)
+{
+  elgpu::registerKernels(kernelInfo);
+  platform->par->extract("casedata", "u_co", uCo);
+  kernelInfo.define("p_uCo") = uCo;
+}
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  jp.read();
+  platform->par->extract("casedata", "u_co", uCo);
+  platform->par->extract("casedata", "source_only", sourceOnly);
+}
+
+void UDF_Setup()
+{
+  auto mesh = nrs->meshV;
+  const auto offset = nrs->fluid->fieldOffset;
+
+  // start from the coflow
+  std::vector<dfloat> U(3 * offset, 0.0);
+  std::fill(U.begin(), U.begin() + mesh->Nlocal, uCo);
+  nrs->fluid->o_U.copyFrom(U.data(), 3 * offset);
+
+  double dt;
+  platform->options.getArgs("DT", dt);
+  std::vector<dfloat> x(mesh->Nlocal), y(mesh->Nlocal), z(mesh->Nlocal);
+  mesh->o_x.copyTo(x.data(), mesh->Nlocal);
+  mesh->o_y.copyTo(y.data(), mesh->Nlocal);
+  mesh->o_z.copyTo(z.data(), mesh->Nlocal);
+  double lz[2] = {*std::min_element(z.begin(), z.end()), *std::max_element(z.begin(), z.end())};
+  MPI_Allreduce(MPI_IN_PLACE, &lz[0], 1, MPI_DOUBLE, MPI_MIN, platform->comm.mpiComm());
+  MPI_Allreduce(MPI_IN_PLACE, &lz[1], 1, MPI_DOUBLE, MPI_MAX, platform->comm.mpiComm());
+  const double Lz = lz[1] - lz[0];
+  double rhof;
+  platform->options.getArgs("FLUID DENSITY", rhof);
+  // kinematic momentum flux per unit depth of the injected liquid
+  const double J = jp.rhop / rhof * jp.phiInj * jp.uJet * jp.uJet * jp.wSlot;
+
+  if (sourceOnly) {
+    // body force per unit volume with int F dx dy = rho J, Gaussian of
+    // sigma = 2 w_slot (a narrower blob drives the gas past the CFL limit
+    // at this dt; the far field depends on J only)
+    const double s = 2 * jp.wSlot;
+    std::vector<dfloat> F(nrs->fluid->fieldOffsetSum, 0.0);
+    for (dlong n = 0; n < mesh->Nlocal; n++) {
+      const double r2 = (x[n] - jp.xNozzle) * (x[n] - jp.xNozzle) + y[n] * y[n];
+      F[n] = rhof * J / (2 * M_PI * s * s) * std::exp(-0.5 * r2 / (s * s));
+    }
+    o_bodyForce.resize(F.size());
+    o_bodyForce.copyFrom(F);
+    nrs->userSource = [](double) { nrs->fluid->o_explicitTerms().copyFrom(o_bodyForce, nrs->fluid->fieldOffsetSum); };
+  } else {
+    elgpu::Config cfg;
+    cfg.rhof = rhof;
+    platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+    cfg.periodic = {false, false, true};
+    cfg.filterWidth = jp.filterWidth;
+    cfg.qtl = jp.qtl != 0;
+    coupling = new elgpu::Coupling(nrs, cfg);
+    injector = new JetInjector{jp, Lz, 0.0};
+    double t0;
+    platform->options.getArgs("START TIME", t0);
+    coupling->initialize({}, {}, {}, {}, t0, {});
+  }
+  if (platform->comm.mpiRank() == 0) {
+    printf("bickley: J %.4e  nu %.2e  tau_p %.4f  source_only %d  droplets/parcel %.2f\n",
+           J, 5e-4, jp.rhop * jp.dp * jp.dp / (18 * 5e-4), sourceOnly, jp.weight(dt, Lz));
+  }
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  const double dt = nrs->dt[0];
+  if (!sourceOnly) {
+    if (tstep > 0) {
+      std::vector<double> x, v, d, rho, w;
+      injector->parcels(dt, x, v, d, rho, w);
+      coupling->inject(x, v, d, rho, w);
+      injected += jp.rhop * jp.liquidPerStep(dt, injector->lz) * jp.uJet;
+    }
+    coupling->step(time, tstep);
+  }
+  if (tstep % jp.reportInterval == 0 || nrs->lastStep) {
+    double umax = platform->linAlg->max(nrs->meshV->Nlocal, nrs->fluid->o_U, platform->comm.mpiComm());
+    long long np = sourceOnly ? 0 : coupling->totals().nEl;
+    if (platform->comm.mpiRank() == 0) {
+      printf("bickley: step %d  t %.3f  nparcel %lld  max u %.4f\n", tstep, time, np, umax);
+    }
+  }
+  if (nrs->lastStep) {
+    dumpField(nrs, "field_final.csv");
+    if (!sourceOnly) {
+      dumpParcels("parcels_final.csv");
+    }
+  }
+}

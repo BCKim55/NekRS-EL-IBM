@@ -1,0 +1,26 @@
+--- a/src/core/plugins/lpm.cpp	2026-10-23 14:31:56
++++ b/src/core/plugins/lpm.cpp	2026-10-23 14:31:57
+@@ -153,10 +153,9 @@
+              "cannot register DOF %s after calling initialize!\n",
+              dofName.c_str());
+ 
+-  const auto nDOFs = dofIds.size();
+   if (dofIds.count(dofName) == 0) {
+     dofNames.push_back(dofName);
+-    dofIds[dofName] = nDOFs;
++    dofIds[dofName] = nDOFs_; // index of the first field, not of the variable
+     outputDofs[dofName] = output;
+     dofCounts[dofName] = Nfields;
+     nDOFs_ += Nfields;
+@@ -200,9 +199,8 @@
+              "cannot register prop %s after calling initialize!\n",
+              propName.c_str());
+ 
+-  const auto nprops = propIds.size();
+-  if (propIds.count(propName) == 0) {
+-    propIds[propName] = nprops;
++  if (propIds.count(propName) == 0) {
++    propIds[propName] = nProps_; // index of the first field, not of the variable
+     outputProps[propName] = output;
+     propCounts[propName] = Nfields;
+     nProps_ += Nfields;

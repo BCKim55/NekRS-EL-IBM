@@ -52,6 +52,13 @@ struct Config {
   // patches/nekRS/0001-lpm-rk-stage-state.patch), which makes them first
   // order for a velocity-dependent RHS, so they are not offered here.
   int rkOrder = 3;
+  // TAB droplet deformation and breakup (O'Rourke & Amsden 1987; dynamic
+  // drag of Liu, Mather & Reitz 1993). Needs sigma (surface tension) and
+  // muL (liquid viscosity). The oscillator is integrated with the particle
+  // RK3, so dt must resolve sqrt(8 sigma / (rho_l r^3)).
+  bool tab = false;
+  double sigma = 0;
+  double muL = 0;
 };
 
 struct Totals {
@@ -137,6 +144,17 @@ public:
     }
     particles->setVerbosity(lpm_t::VerbosityLevel::None);
     particles->addInterpField("fluid_velocity", mesh->dim, nrs->fluid->fieldOffset, nrs->fluid->o_U);
+    // Registration order matters: lpm_t numbers a variable by its position
+    // in the list but slices it by that number times the field offset, so a
+    // variable registered after a multi-component one lands on the wrong
+    // fields (patches/nekRS/0002-lpm-dof-field-index.patch). Single-field
+    // variables first, one multi-field variable last, for DOFs and props.
+    if (cfg.tab) {
+      particles->addVariable("taby");  // TAB distortion y ...
+      particles->addVariable("tabyd"); // ... and its rate (adjacent fields)
+      particles->addProp("tbreak");    // first breakup time, -1: none
+      breakupKernel = platform->kernelRequests.load("elgpu", "elgpuBreakup");
+    }
     particles->addVariable(mesh->dim, "velocity");
     particles->addProp("dp");
     particles->addProp("rhop");
@@ -168,7 +186,10 @@ public:
     pack(x, v, dp, rhop, weight, y0, prop);
     particles->initialize(n, t0, y0);
     if (n) {
-      for (const char *name : {"dp", "rhop", "gid", "np"}) {
+      for (const char *name : {"dp", "rhop", "gid", "np", "tbreak"}) {
+        if (std::string(name) == "tbreak" && !cfg.tab) {
+          continue;
+        }
         const int k = particles->propId(name);
         particles->setProp(name, deviceMemory<dfloat>(std::vector<dfloat>(prop.begin() + k * n, prop.begin() + (k + 1) * n)));
       }
@@ -196,6 +217,7 @@ public:
     }
     fAccValid = false;
     particles->integrate(time);
+    breakup(time);
     wrap();
     particles->migrate();
     particles->deleteParticles();
@@ -266,7 +288,7 @@ private:
   int lapSign = 0;
   double dtSmooth = 0;
   std::unique_ptr<lpm_t> particles;
-  occa::kernel rhsKernel, forceKernel, wrapKernel, depositKernel, sourceKernel, weakLaplacianKernel;
+  occa::kernel rhsKernel, forceKernel, wrapKernel, depositKernel, sourceKernel, weakLaplacianKernel, breakupKernel;
   occa::memory o_fieldOffsetScan;
   static constexpr int nAcc = 7; // F(3), vol, vol*v(3)
   occa::memory o_one, o_acc, o_FU, o_div, o_phifLast;
@@ -275,6 +297,30 @@ private:
   bool fAccValid = false;              // fAcc holds this step's RK-weighted force
 
   static MPI_Comm comm() { return platform->comm.mpiComm(); }
+
+  int tabId() const { return cfg.tab ? particles->dofId("taby") : -1; }
+
+  void breakup(double time)
+  {
+    const int n = particles->numParticles();
+    if (!cfg.tab || n == 0) {
+      return;
+    }
+    breakupKernel(n, particles->fieldOffset(), tabId(), cfg.sigma, time, particles->getDOF("x"), particles->getProp("rhop"),
+                  particles->getProp("dp"), particles->getProp("np"), particles->getProp("tbreak"));
+  }
+
+  // per-particle scratch sized to the current lpm_t field offset
+  void ensureParticleBuffers(int off)
+  {
+    const size_t n = std::max(off, 1);
+    if (!o_q.isInitialized() || o_q.length() < nAcc * n) {
+      o_q = platform->device.malloc<dfloat>(nAcc * n);
+      o_el = platform->device.malloc<dlong>(n);
+      o_r = platform->device.malloc<dfloat>(3 * n);
+      o_Up = platform->device.malloc<dfloat>(3 * n);
+    }
+  }
 
   long long nElGlobal = 0;
 
@@ -306,6 +352,9 @@ private:
       prop[i + particles->propId("gid") * n] = nElGlobal + gid0 + i;
       prop[i + particles->propId("np") * n] = weight.empty() ? 1.0 : weight[i];
       // fAcc starts at zero (prop already zero-filled)
+      if (cfg.tab) {
+        prop[i + particles->propId("tbreak") * n] = -1.0;
+      }
     }
     long long total = n;
     MPI_Allreduce(MPI_IN_PLACE, &total, 1, MPI_LONG_LONG, MPI_SUM, comm());
@@ -322,8 +371,11 @@ private:
     rhsKernel(n,
               lpm->fieldOffset(),
               lpm->dofId("velocity"),
+              tabId(),
               cfg.mu,
               cfg.rhof,
+              cfg.sigma,
+              cfg.muL,
               cfg.grav[0],
               cfg.grav[1],
               cfg.grav[2],
@@ -368,10 +420,8 @@ private:
     // is what the parcels lose; fAcc is a prop and migrates with the parcel
     auto o_fAcc = lpm->getProp("fAcc");
     auto accumulate = [&](const occa::memory &o_state, double w, bool first) {
-      if (!o_q.isInitialized() || o_q.length() < static_cast<size_t>(nAcc * std::max(off, 1))) {
-        o_q = platform->device.malloc<dfloat>(nAcc * std::max(off, 1));
-      }
-      forceKernel(n, off, lpm->dofId("velocity"), cfg.mu, cfg.rhof, o_state, lpm->getProp("dp"), lpm->getProp("np"), lpm->getInterpField("fluid_velocity"), o_q);
+      ensureParticleBuffers(off);
+      forceKernel(n, off, lpm->dofId("velocity"), tabId(), cfg.mu, cfg.rhof, o_state, lpm->getProp("dp"), lpm->getProp("np"), lpm->getInterpField("fluid_velocity"), o_q);
       platform->linAlg->axpbyMany(n, 3, off, w, o_q, first ? 0.0 : 1.0, o_fAcc);
     };
 
@@ -472,19 +522,14 @@ private:
     const int n = particles->numParticles();
     const int poff = particles->fieldOffset();
 
-    if (!o_q.isInitialized() || o_q.length() < static_cast<size_t>(nAcc * std::max(poff, 1))) {
-      o_q = platform->device.malloc<dfloat>(nAcc * std::max(poff, 1));
-      o_el = platform->device.malloc<dlong>(std::max(poff, 1));
-      o_r = platform->device.malloc<dfloat>(3 * std::max(poff, 1));
-      o_Up = platform->device.malloc<dfloat>(3 * std::max(poff, 1));
-    }
+    ensureParticleBuffers(poff);
     platform->linAlg->fill(nAcc * offset, 0.0, o_acc);
     // the current fluid velocity at the new positions (lpm_t's own
     // interpolate() would use the state extrapolated to the last RK stage);
     // collective, so every rank calls it, particles or not
     particles->interpolator().eval(3, offset, fluid->o_U, poff, o_Up);
     if (n) {
-      forceKernel(n, poff, particles->dofId("velocity"), cfg.mu, cfg.rhof, particles->getDOF("x"), particles->getProp("dp"), particles->getProp("np"), o_Up, o_q);
+      forceKernel(n, poff, particles->dofId("velocity"), tabId(), cfg.mu, cfg.rhof, particles->getDOF("x"), particles->getProp("dp"), particles->getProp("np"), o_Up, o_q);
       if (fAccValid) {
         // force from the RK stages instead of the end-of-step state
         o_q.copyFrom(particles->getProp("fAcc"), 3 * poff);
