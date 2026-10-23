@@ -191,6 +191,51 @@ momentum drift from -5.6e-3 to -1.2e-3 of the gravity impulse (ppiclF path:
 t = 0.5 when the induced gas velocity (0.83 u_jet) pushed the gas CFL past 1:
 nekRS's own advection limit, not the coupling.
 
+## 2b'. Plane laminar jet from parcels (`cases/jet_bickley`)
+
+Open slab (inflow with a 5 % coflow, outflow, free-slip sides, 40 x 32 x 1
+elements, N = 5, `nu = 5e-4`), a slot stream of small droplets
+(`tau_p = 0.016`) that stop within ~0.16 of the nozzle, so far downstream
+the gas must be the Bickley plane laminar jet of the injected kinematic
+momentum flux J = 0.02:
+`u_c = 0.4543 (J^2/(nu x))^(1/3)`, `u = u_c sech^2(0.2752 (J/(nu^2 x^2))^(1/3) y)`.
+The nekRS-only reference is the same J as a fixed Gaussian body force
+(`source_only = 1`). Both run to t = 20 (steady).
+
+Body force: `int u (u - u_co) dy` is constant along the jet to 0.3 % at
+0.0173, 14 % below J because the free-slip sides confine the entrainment
+(the coflow outside the jet is slowed, the excess velocity goes negative at
+|eta| > 2 and that deficit is in the integral). Against Bickley with the
+measured 0.0173: centreline decay within 3.7 %, half-width within 12 % and the
+profile is sech^2 — the plane-jet similarity is reproduced; the 14 % is the
+domain, not the solver.
+
+First parcel attempt (u_jet = 1, mass loading 10): the gas carried only
+0.0105 and the parcels the rest. Not an error: once the droplets have
+decelerated to the gas speed (~0.5 u_jet) they still carry their mass flux
+times that speed, half of J at this loading. The test therefore needs the
+liquid *mass* flux to be small while J is kept: u_jet = 10, mass loading
+0.01 (parcels keep 0.5 % of J); that run and the step-2 sensitivity runs
+(filter width 0.03/0.06, 40 parcels per step, dt/2) are reported below.
+
+## 2c. Round particle-laden jet (`cases/jet_modarress`, prepared)
+
+The standard experiment for two-way EL codes with solid particles: Modarress,
+Tan & Elghobashi (1984), air jet, D = 20 mm, Re_D = 13 300, 50 um glass
+beads (rho_p/rho_g = 2490, St = tau_p U_0/D = 11.5), mass loading 0.32 and
+0.85; centreline gas and particle velocity decay and radial profiles. The
+case is set up in nondimensional form (D = U_0 = rho_g = 1): box 20D x 8D
+x 8D, 40 x 24 x 24 elements at N = 5 (10^6 points, a coarse LES grid),
+smoothed top-hat nozzle inflow with a 3 % coflow, outflow, symmetry sides,
+parcels over the nozzle disc at the gas speed. It is turbulent, so it is a
+GPU-node job (hours), and on this laptop the full mesh does not even link
+(Nek5000's static arrays exceed the macOS arm64 linker's 2 GB range at any
+rank count). A 16 x 10 x 10 copy (`jet_coarse.re2`) ran 20 steps on 4 CPU
+ranks (0.7 s/step) as a smoke test: injection, coupling and the report are
+exercised, nothing physical is claimed. The experimental curves still have to
+be digitised from the paper (or from Apte, Mahesh & Lundgren 2003, who
+simulated it) into `scripts/`.
+
 ## 3. Known limitations
 
 - No IBM–IBM contact and no wall contact; ppiclF's wall support
