@@ -27,7 +27,7 @@
 #define PPICLF_R_JTYPE 1
 #define PPICLF_R_JRHOP 2
 #define PPICLF_R_JDP 3
-/* EL: particle volume; marker: surface share * Gaussian thickness */
+/* EL: parcel liquid volume (N_p droplets of diameter JDP); marker: surface share * Gaussian thickness */
 #define PPICLF_R_JVOLP 4
 /* fluid velocity interpolated at the particle */
 #define PPICLF_R_JUX 5

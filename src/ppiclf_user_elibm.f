@@ -227,7 +227,7 @@
       include "ELIBM.inc"
 !
       real*8 rpi, rmass, dp, ur(3), rep, fd, fb(3), fc(3), r(3),
-     >       ud(3), vol, wimp
+     >       ud(3), vol, wimp, rnp
       integer*4 i, b, k
 !
       rpi = 4.0d0*atan(1.0d0)
@@ -265,9 +265,12 @@
             cycle
          endif
 
-         vol   = ppiclf_rprop(PPICLF_R_JVOLP,i)
-         rmass = vol*ppiclf_rprop(PPICLF_R_JRHOP,i)
+         ! an EL particle is a parcel of rnp droplets of diameter dp
+         ! with total liquid volume JVOLP; the equation of motion is
+         ! per droplet, the feedback on the fluid per parcel
          dp    = ppiclf_rprop(PPICLF_R_JDP,i)
+         rmass = rpi/6.0d0*dp**3*ppiclf_rprop(PPICLF_R_JRHOP,i)
+         rnp   = ppiclf_rprop(PPICLF_R_JVOLP,i)/(rpi/6.0d0*dp**3)
 
          do k=1,3
             ur(k) = ppiclf_rprop(PPICLF_R_JUX-1+k,i)
@@ -310,8 +313,8 @@
             ppiclf_ydot(PPICLF_JVX-1+k,i) = (fd*ur(k) + fc(k)
      >         + ppiclf_rprop(PPICLF_R_JCX-1+k,i))/rmass
      >         + elibm_grav(k)
-            ! reaction of the drag on the fluid
-            ppiclf_rprop(PPICLF_R_JFX-1+k,i) = -fd*ur(k)
+            ! reaction of the drag on the fluid, for the whole parcel
+            ppiclf_rprop(PPICLF_R_JFX-1+k,i) = -rnp*fd*ur(k)
          enddo
       enddo
 
@@ -371,8 +374,10 @@
       if (nint(rpropi(PPICLF_R_JTYPE)) .ne. PPICLF_TYPE_EL) return
       if (nint(rpropj(PPICLF_R_JTYPE)) .ne. PPICLF_TYPE_EL) return
 
-      rmi = rpropi(PPICLF_R_JVOLP)*rpropi(PPICLF_R_JRHOP)
-      rmj = rpropj(PPICLF_R_JVOLP)*rpropj(PPICLF_R_JRHOP)
+      rmi = 0.5235987755982988d0*rpropi(PPICLF_R_JDP)**3
+     >     *rpropi(PPICLF_R_JRHOP)
+      rmj = 0.5235987755982988d0*rpropj(PPICLF_R_JDP)**3
+     >     *rpropj(PPICLF_R_JRHOP)
       call elibm_ContactForce(yi(PPICLF_JX),yi(PPICLF_JVX),
      >   0.5d0*rpropi(PPICLF_R_JDP),rmi,
      >   yj(PPICLF_JX),yj(PPICLF_JVX),0.5d0*rpropj(PPICLF_R_JDP),rmj,f)

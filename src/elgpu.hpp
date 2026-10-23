@@ -42,10 +42,16 @@ struct Config {
   vec3 grav{};
   std::array<bool, 3> periodic{};
   double filterWidth = 0; // Gaussian FWHM
+  bool twoWay = true; // false: particles feel the fluid, the fluid not the particles
   bool qtl = true;
   bool qtlFromFlux = true; // d phi/dt from the projected volume flux, else finite difference
   bool zeroMeanDiv = true;
-  int rkOrder = 3;
+  // lpm_t's RK3 and RK4 evaluate the intermediate stages with the start-of-
+  // step state (nekRS v26 lpm.cpp, integrateRK3/4: o_y_ instead of
+  // o_ytmp_), which makes them first order for a velocity-dependent RHS;
+  // RK2 is implemented correctly. Verified in cases/spray_jet2d (single
+  // droplet vs the drag ODE).
+  int rkOrder = 2;
 };
 
 struct Totals {
@@ -129,6 +135,7 @@ public:
     particles->addProp("dp");
     particles->addProp("rhop");
     particles->addProp("gid");
+    particles->addProp("np"); // droplets per parcel
     particles->addUserData(this);
     particles->setUserRHS([](lpm_t *lpm, double, const deviceMemory<dfloat> &o_y, void *ud, deviceMemory<dfloat> &o_ydot) {
       static_cast<Coupling *>(ud)->rhs(lpm, o_y, o_ydot);
@@ -140,41 +147,40 @@ public:
   int smoothingSteps() const { return nSmooth; }
   lpm_t &lpm() { return *particles; }
 
-  // x, v: (3, n) column-major as in elibm; created on the calling rank
+  // x, v: (3, n) column-major as in elibm; created on the calling rank.
+  // weight = droplets per parcel (empty: 1).
   void initialize(const std::vector<double> &x,
                   const std::vector<double> &v,
                   const std::vector<double> &dp,
                   const std::vector<double> &rhop,
-                  double t0)
+                  double t0,
+                  const std::vector<double> &weight = {})
   {
     const int n = dp.size();
-    const int nDOF = particles->nDOFs();
-    std::vector<dfloat> y0(static_cast<size_t>(nDOF) * n, 0.0);
-    const int vId = particles->dofId("velocity");
-    for (int i = 0; i < n; i++) {
-      for (int k = 0; k < 3; k++) {
-        y0[i + k * n] = x[3 * i + k];
-        y0[i + (vId + k) * n] = v[3 * i + k];
-      }
-    }
-    long long gid0 = n;
-    MPI_Exscan(MPI_IN_PLACE, &gid0, 1, MPI_LONG_LONG, MPI_SUM, comm());
-    if (platform->comm.mpiRank() == 0) {
-      gid0 = 0;
-    }
-    std::vector<dfloat> gid(n);
-    for (int i = 0; i < n; i++) {
-      gid[i] = gid0 + i;
-    }
-
+    std::vector<dfloat> y0, prop;
+    pack(x, v, dp, rhop, weight, y0, prop);
     particles->initialize(n, t0, y0);
     if (n) {
-      particles->setProp("dp", deviceMemory<dfloat>(std::vector<dfloat>(dp.begin(), dp.end())));
-      particles->setProp("rhop", deviceMemory<dfloat>(std::vector<dfloat>(rhop.begin(), rhop.end())));
-      particles->setProp("gid", deviceMemory<dfloat>(gid));
+      const int np = particles->nProps();
+      for (int k = 0; k < np; k++) {
+        auto name = std::vector<std::string>{"dp", "rhop", "gid", "np"}[k];
+        particles->setProp(name, deviceMemory<dfloat>(std::vector<dfloat>(prop.begin() + k * n, prop.begin() + (k + 1) * n)));
+      }
     }
     particles->migrate();
     updateSources(nullptr);
+  }
+
+  // Add parcels during the run; collective (every rank calls it, any count).
+  void inject(const std::vector<double> &x,
+              const std::vector<double> &v,
+              const std::vector<double> &dp,
+              const std::vector<double> &rhop,
+              const std::vector<double> &weight = {})
+  {
+    std::vector<dfloat> y0, prop;
+    pack(x, v, dp, rhop, weight, y0, prop);
+    particles->addParticles(dp.size(), y0, prop);
   }
 
   void step(double time, int tstep)
@@ -260,6 +266,41 @@ private:
   occa::memory o_q, o_el, o_r, o_Up; // per particle: (F, vol), element, reference coords, fluid velocity
 
   static MPI_Comm comm() { return platform->comm.mpiComm(); }
+
+  long long nElGlobal = 0;
+
+  // lpm_t layout: y0 (nDOF, n) and prop (nProps, n), n fastest
+  void pack(const std::vector<double> &x,
+            const std::vector<double> &v,
+            const std::vector<double> &dp,
+            const std::vector<double> &rhop,
+            const std::vector<double> &weight,
+            std::vector<dfloat> &y0,
+            std::vector<dfloat> &prop)
+  {
+    const int n = dp.size();
+    const int vId = particles->dofId("velocity");
+    y0.assign(static_cast<size_t>(particles->nDOFs()) * n, 0.0);
+    prop.assign(static_cast<size_t>(particles->nProps()) * n, 0.0);
+    long long gid0 = n;
+    MPI_Exscan(MPI_IN_PLACE, &gid0, 1, MPI_LONG_LONG, MPI_SUM, comm());
+    if (platform->comm.mpiRank() == 0) {
+      gid0 = 0;
+    }
+    for (int i = 0; i < n; i++) {
+      for (int k = 0; k < 3; k++) {
+        y0[i + k * n] = x[3 * i + k];
+        y0[i + (vId + k) * n] = v[3 * i + k];
+      }
+      prop[i + particles->propId("dp") * n] = dp[i];
+      prop[i + particles->propId("rhop") * n] = rhop[i];
+      prop[i + particles->propId("gid") * n] = nElGlobal + gid0 + i;
+      prop[i + particles->propId("np") * n] = weight.empty() ? 1.0 : weight[i];
+    }
+    long long total = n;
+    MPI_Allreduce(MPI_IN_PLACE, &total, 1, MPI_LONG_LONG, MPI_SUM, comm());
+    nElGlobal += total;
+  }
 
   void rhs(lpm_t *lpm, const deviceMemory<dfloat> &o_y, deviceMemory<dfloat> &o_ydot)
   {
@@ -370,7 +411,7 @@ private:
     // collective, so every rank calls it, particles or not
     particles->interpolator().eval(3, offset, fluid->o_U, poff, o_Up);
     if (n) {
-      forceKernel(n, poff, particles->dofId("velocity"), cfg.mu, cfg.rhof, particles->getDOF("x"), particles->getProp("dp"), o_Up, o_q);
+      forceKernel(n, poff, particles->dofId("velocity"), cfg.mu, cfg.rhof, particles->getDOF("x"), particles->getProp("dp"), particles->getProp("np"), o_Up, o_q);
 
       // after migrate() every particle is local: findpts' element and
       // reference coordinates are in particle order on the host
@@ -405,7 +446,10 @@ private:
     auto o_divFlux = opSEM::strongDivergence(mesh, offset, o_acc.slice(4 * offset, 3 * offset));
     sourceKernel(mesh->Nlocal, offset, cfg.qtlFromFlux ? 1 : 0, dt ? 1.0 / *dt : 0.0, o_acc, o_phifLast, o_divFlux,
                  fluid->o_U, o_grad, o_FU, o_div);
-    if (!dt || !cfg.qtl) {
+    if (!cfg.twoWay) {
+      platform->linAlg->fill(fluid->fieldOffsetSum, 0.0, o_FU);
+    }
+    if (!dt || !cfg.qtl || !cfg.twoWay) {
       platform->linAlg->fill(offset, 0.0, o_div);
     } else if (cfg.zeroMeanDiv) {
       const double mean = platform->linAlg->innerProd(mesh->Nlocal, mesh->o_LMM, o_div, comm()) / volume;

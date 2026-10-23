@@ -45,7 +45,7 @@ fi
 fortran_libs=$("$FC" --showme:link 2>/dev/null | tr ' ' '\n' | grep -E '^-(L|l)' | paste -sd ';' - || true)
 gfortran_dir=$(dirname "$("$FC" -print-file-name=libgfortran.a)")
 cat > "$out/udf.env" <<EOF
-export NEKRS_UDF_INCLUDES="$root/src;$user;$src/source"
+export NEKRS_UDF_INCLUDES="$root/src;$user;$(dirname "$user");$src/source"
 export NEKRS_UDF_LIBS="$src/source/libppiclF.a;$fortran_libs;-L$gfortran_dir;-lgfortran"
 EOF
 echo "ppiclF built: $src/source/libppiclF.a"

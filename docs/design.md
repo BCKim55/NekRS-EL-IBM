@@ -96,6 +96,7 @@ in `patches/ppiclF/`.
 | 4 | Fluid fields are interpolated only at the first RK stage (`FinalizeInterp` resets the counter) | particle RK3 is first order in the fluid velocity seen along the path; for tracers it collapses to forward Euler | by design; fine for drag-dominated inertial particles, revisit for tracer-like particles |
 | 5 | `ProjectParticleGrid` tests every particle against every GLL node of every element in its bin range | with one bin per rank, cost ~ particles × all local nodes (13 s/step for 10k particles, 216 N=5 elements) | `0003-projection-element-loop.patch`: skip elements whose bounding box is beyond the cutoff (bit-identical, 6× faster) |
 | 6 | `ProjectParticleGrid` leaves the element loop (`exit`) at the first element whose lowest bin exceeds the particle's | assumes every element on a rank has a node in that rank's bin; false after 0002, so most elements were skipped (79 % of the force lost on 4 ranks) | `0003`: `cycle` instead of `exit` |
+| 8 | `CreateBin` loops forever (`do while (bins_dx < d2chk)` with `n_bins` already 1) when a periodic direction of the domain is shorter than the filter cutoff | a thin periodic slab with a filter wider than its thickness hangs at start-up with no message | not patched: the ghost logic cannot represent more than one periodic image; keep every periodic length ≥ 2 x cutoff (`spray_jet2d` uses Lz = 0.1 with FWHM 0.04) |
 | 7 | `CreateGhost` drops a ghost when one was already sent to the same rank, unless the new one is periodic | with periodic bins narrower than twice the cutoff a rank needs both the unshifted and the periodic image; the unshifted one was dropped (1e-4 of the projected force on 4 ranks) | `0004-ghost-periodic-images.patch`: deduplicate on (rank, image position) |
 
 Verification, one-way (`rotation_tracer`, frozen solid-body rotation on the unit-sphere
@@ -149,6 +150,42 @@ k_n = 500, e = 0.9, 10 particle sub-steps per fluid step dt = 5e-3, 240 steps;
   (lagged forces, the rigid internal-fluid model);
 - IBM slip (RMS `|u_body - u|` at the markers) is 5e-3 at the end, under 2 %
   of the body speed, and peaks at 1.8e-2 during the impacts.
+
+## 2b. Spray step 1: parcels and injection (`cases/spray_jet2d`)
+
+Both paths treat an EL particle as a parcel of `N_p` droplets of diameter
+`d_p`: the equation of motion is per droplet (drag + gravity, nothing else
+is needed at `rho_l / rho_g ~ 1000`), the force on the fluid and the liquid
+volume are per parcel. The ppiclF path stores the parcel liquid volume in
+`rprop(JVOLP)` and derives `N_p` from it; the device path has a `np`
+property. Parcels are created during the run (`Coupling::inject`) from a
+deterministic generator shared by both cases, so the two runs see identical
+input. No breakup, deformation or dense-regime drag yet.
+
+Verification, quasi-2D slot jet: box 2 x 1 x 0.1 (40 x 20 x 1 elements,
+N = 5; periodic x, z; free-slip y, so the x momentum of gas + parcels equals
+the injected momentum exactly), gas `rho = 1`, `nu = 5e-4`, slot width 0.02
+at x = 0.1, liquid `rho = 1000`, `d_p = 0.002` (tau_p = 0.44, Re_p0 = 4),
+`u_jet = 1`, liquid volume fraction 0.01 in the slot (mass loading 10 at the
+nozzle), 10 parcels per step of 2.4 droplets, dt = 2e-3, 1000 steps, no
+gravity, 4 ranks:
+
+| | ppiclF path | device path |
+|---|---|---|
+| single droplet vs drag ODE, max error / U0 | 7e-8 (RK3) | 1.5e-5 (RK2, see §4) |
+| momentum budget at t = 2 (max over the run) | +8.6e-4 (2.8e-3) | -8.9e-4 (3.2e-3) |
+| fluid budget `P_gas - int FU` | 1.6e-4 | 1.6e-4 |
+| P_gas, P_parcels at t = 2 | 1.0720e-2, 2.9314e-2 | 1.0752e-2, 2.9212e-2 |
+| centreline gas u_x, max | 0.8333 | 0.8323 |
+| centreline difference | — | max 0.0145, rms 0.0030 |
+| step time | 1.25 s (10 k parcels) | 0.19 s |
+
+The two implementations (ppiclF's bins, ghosts and Gaussian sum vs `lpm_t`,
+L2 projection and diffusion filter) agree to 0.3 % in momenta and 1.7 % in
+the centreline velocity at the jet head, with the momentum budget closed to
+1e-3 of the injected momentum in both. At dt = 5e-3 both runs blew up at
+t = 0.5 when the induced gas velocity (0.83 u_jet) pushed the gas CFL past 1:
+nekRS's own advection limit, not the coupling.
 
 ## 3. Known limitations
 
@@ -208,6 +245,18 @@ host — exactly what a projection kernel needs, and two small arrays to copy.
   large). `Config::qtlFromFlux = false` keeps the finite difference.
 - `elgpuSource`: `FU = F / (1 - phi_p)` and the QTL divergence on the device.
 - Periodic wrap kernel; particles leaving a non-periodic domain are deleted.
+
+### nekRS `lpm_t` finding
+
+`lpm_t::integrateRK3` and `integrateRK4` (nekRS v26, `src/core/plugins/lpm.cpp`)
+pass the start-of-step state `o_y_` to the user RHS at the intermediate
+stages instead of the stage state `o_ytmp_` (the positions for the fluid
+interpolation *are* the stage positions, only the state handed to the RHS is
+stale). For a velocity-dependent RHS the scheme is then first order: in the
+single-droplet check of `spray_jet2d` the velocity error was 1.9e-3 U0 with
+"RK3" and 1.5e-5 U0 with RK2, which is implemented correctly. `elgpu` uses
+RK2 (`Config::rkOrder = 2`); the ppiclF path's own RK3 gives 7e-8 U0 on the
+same check.
 
 ### Not there yet
 

@@ -1,0 +1,120 @@
+// Quasi-2D spray jet, ppiclF path (src/elibm.hpp): parcels of water
+// droplets injected from a slot into quiescent gas, two-way coupled, no
+// gravity, no breakup (step 1 of the spray model). Reported:
+//   P_gas, P_drop  x momentum of the gas and of the parcels
+//   budget         (P_gas + P_drop - injected) / injected
+//   fluid          (P_gas - int_0^t int FU dV dt) / injected
+// With parcels_per_step = 0 a single droplet is released instead and
+// "drop:" lines give its velocity for the drag-ODE comparison.
+
+#include "elibm.hpp"
+#include "jet_common.hpp"
+
+static JetParams jp;
+static JetInjector *injector = nullptr;
+static elibm::Coupling *coupling = nullptr; // never deleted (MPI resources)
+static double injected = 0, sourceX = 0, sourceImpulse = 0;
+
+#ifdef __okl__
+
+#endif
+
+static void dumpParcels(const std::string &name)
+{
+  std::vector<double> y, r;
+  ppiclf::particles(y, r);
+  std::vector<double> rows;
+  for (int i = 0; i < ppiclf::numParticles(); i++) {
+    rows.insert(rows.end(), {y[i * PPICLF_LRS], y[i * PPICLF_LRS + 1], y[i * PPICLF_LRS + 2], y[i * PPICLF_LRS + 3]});
+  }
+  gatherRows(rows, 4, name);
+}
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  jp.read();
+}
+
+void UDF_Setup()
+{
+  elibm::Config cfg;
+  platform->options.getArgs("FLUID DENSITY", cfg.rhof);
+  platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+  cfg.periodic = {true, false, true};
+  cfg.filterWidth = jp.filterWidth;
+  cfg.qtl = jp.qtl != 0;
+  cfg.twoWay = jp.parcelsPerStep > 0; // single-droplet check is one-way
+  coupling = new elibm::Coupling(nrs, cfg);
+  const auto lo = coupling->domainLo();
+  const auto hi = coupling->domainHi();
+
+  double dt;
+  platform->options.getArgs("DT", dt); // nrs->dt[0] is not set yet in UDF_Setup
+  injector = new JetInjector{jp, hi[2] - lo[2], 0.5 * (lo[1] + hi[1]), dt};
+
+  // two identical droplets: ppiclF's bins need a nonzero particle extent
+  // in the non-periodic direction
+  if (jp.parcelsPerStep == 0 && platform->comm.mpiRank() == 0) {
+    for (double yy : {0.4, 0.6}) {
+      elibm::ElParticle p;
+      p.x = {jp.xNozzle, yy, 0.5 * (lo[2] + hi[2])};
+      p.v = {jp.uJet, 0, 0};
+      p.dp = jp.dp;
+      p.rho = jp.rhop;
+      coupling->addEl(p);
+    }
+  }
+  coupling->initialize();
+  if (platform->comm.mpiRank() == 0) {
+    printf("jet: %d parcels/step, %.3f droplets per parcel, tau_p %.4f\n",
+           jp.parcelsPerStep, jp.weight(dt, hi[2] - lo[2]), jp.rhop * jp.dp * jp.dp / (18 * cfg.mu));
+  }
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  const double dt = nrs->dt[0];
+  if (tstep > 0) {
+    sourceImpulse += dt * sourceX;
+    if (jp.parcelsPerStep > 0) {
+      std::vector<double> x, v, d, rho, w;
+      injector->parcels(x, v, d, rho, w);
+      std::vector<elibm::ElParticle> list(d.size());
+      for (size_t i = 0; i < d.size(); i++) {
+        list[i].x = {x[3 * i], x[3 * i + 1], x[3 * i + 2]};
+        list[i].v = {v[3 * i], v[3 * i + 1], v[3 * i + 2]};
+        list[i].dp = d[i];
+        list[i].rho = rho[i];
+        list[i].weight = w[i];
+      }
+      coupling->inject(list);
+      injected += jp.rhop * jp.liquidPerStep(dt, injector->lz) * jp.uJet;
+    }
+  }
+  coupling->step(time, tstep);
+  const auto tot = coupling->totals();
+  sourceX = tot.source[0];
+
+  if (jp.parcelsPerStep == 0) {
+    std::vector<double> y, r;
+    ppiclf::particles(y, r);
+    for (int i = 0; i < ppiclf::numParticles(); i++) {
+      if (std::lround(r[i * PPICLF_LRP + PPICLF_R_JID - 1]) == 0) {
+        printf("drop: %d %.8e %.10e %.10e\n", tstep, time, y[i * PPICLF_LRS + PPICLF_JVX - 1], y[i * PPICLF_LRS + PPICLF_JX - 1]);
+      }
+    }
+    return;
+  }
+  if (tstep % jp.reportInterval == 0 || nrs->lastStep) {
+    if (platform->comm.mpiRank() == 0) {
+      printf("jet: step %d  t %.3f  nparcel %lld  Pgas %.6e  Pdrop %.6e  injected %.6e  budget %.3e  fluid %.3e  divErr %.2e\n",
+             tstep, time, tot.nEl, tot.fluidMomentum[0], tot.elMomentum[0], injected,
+             injected > 0 ? (tot.fluidMomentum[0] + tot.elMomentum[0] - injected) / injected : 0.0,
+             injected > 0 ? (tot.fluidMomentum[0] - sourceImpulse) / injected : 0.0, tot.divErrRms);
+    }
+  }
+  if (nrs->lastStep) {
+    dumpField(nrs, "field_final.csv");
+    dumpParcels("parcels_final.csv");
+  }
+}

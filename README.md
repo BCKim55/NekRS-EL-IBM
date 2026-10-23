@@ -70,9 +70,12 @@ the shared model in `src/`, or the patches change, and always relinks the UDF.
 | `rotation_tracer` | one-way: tracers in a frozen solid-body rotation | positions match ppiclF's discrete solution to 2e-14 on 1–8 ranks |
 | `settling_twoway` | two-way: 10k particles settling in a periodic box, with `qtl` | projection error = Gaussian truncation (3.6e-4); momentum to 1e-3 of the gravity impulse; QTL imposed to nekRS's own divergence error; 1 and 4 ranks identical |
 | `settling_gpu` | `settling_twoway` on the device path (`src/elgpu.hpp`) | matches the ppiclF path to 0.2–0.6 % in momenta and drag, same divergence error; 1 and 4 ranks identical; 8–10x faster per step even on CPU |
+| `spray_jet2d`, `spray_jet2d_gpu` | spray step 1: parcels injected from a slot into quiescent gas, both paths on identical input | single droplet matches the drag ODE (7e-8 / 1.5e-5 of U0); momentum budget closed to 1e-3; the two paths agree to 0.3 % in momenta, 1.7 % in centreline velocity |
 | `el_ibm_collision` | EL particles fired at a free IBM sphere | no particle enters the sphere, the sphere picks up the cloud's momentum (u 0 → 0.27), total momentum within 0.3 %, IBM slip ≈ 2 % of the body speed |
 
 ![Collision demo summary](docs/img/collision_summary.png)
+
+![Spray jet, both particle paths](docs/img/spray_jet2d.png)
 
 ## Status
 
@@ -82,6 +85,8 @@ the shared model in `src/`, or the patches change, and always relinks the UDF.
 - [x] IBM rigid spheres (NekIBM-style direct forcing) on ppiclF markers
 - [x] EL–EL and EL–IBM soft-sphere contact
 - [x] Device EL path (`lpm_t` + projection/filter kernels), two-way + QTL
+- [x] Spray step 1: parcels (`N_p` droplets each) and run-time injection, both paths
+- [ ] Spray steps 2–3: droplet deformation drag (TAB), breakup (TAB / KH-RT), dense-regime corrections
 - [ ] IBM–IBM contact, particle–wall contact (ppiclF walls are not wired yet)
 - [ ] Device path: contact (cell list), IBM markers, implicit Helmholtz filter
 

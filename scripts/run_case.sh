@@ -22,7 +22,7 @@ if [ -f "$case_dir/user_routines/PPICLF_USER.h" ]; then
   source "$build/udf.env"
 else
   # device-only case (src/elgpu.hpp): no ppiclF
-  export NEKRS_UDF_INCLUDES="$root/src"
+  export NEKRS_UDF_INCLUDES="$root/src;$case_dir"
   export NEKRS_UDF_LIBS=""
 fi
 

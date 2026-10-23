@@ -1,0 +1,43 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+numSteps = 1000
+dt = 2e-3
+timeStepper = tombo2
+checkpointInterval = 0
+
+[MESH]
+# 40 x 20 x 1 elements on [0,2] x [0,1] x [0,0.1]; periodic x, z; symmetry y
+file = "jet.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-8
+
+[FLUID VELOCITY]
+# symmetry (free-slip) at y = 0, 1: no x force on the gas, so
+# P_gas + P_drops = injected momentum exactly
+boundaryTypeMap = zeroDirichletN/zeroNeumann
+residualTol = 1e-10
+rho = 1.0
+viscosity = 5e-4
+
+[CASEDATA]
+# slot nozzle at x = x0, y = 0.5, full z: liquid at speed u_jet occupies a
+# volume fraction phi_inj of the slot of width w
+u_jet = 1.0
+w_slot = 0.02
+x_nozzle = 0.1
+phi_inj = 0.01
+dp = 0.002
+rhop = 1000.0
+# parcels created per step (0: single-droplet check, see below)
+parcels_per_step = 10
+# Gaussian FWHM for projection
+filter_width = 0.04
+qtl = 0
+report_interval = 20
+# single-droplet mode (parcels_per_step = 0): one droplet released at the
+# nozzle with u_jet; its velocity is printed every step for comparison
+# with the drag ODE (scripts/jet_reference.py)

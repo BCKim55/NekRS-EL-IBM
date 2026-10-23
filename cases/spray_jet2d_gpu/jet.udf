@@ -1,0 +1,116 @@
+// The spray_jet2d case on the device particle path (src/elgpu.hpp); same
+// input (jet_common.hpp), same report columns.
+
+#include "elgpu.hpp"
+#include "jet_common.hpp"
+
+static JetParams jp;
+static JetInjector *injector = nullptr;
+static elgpu::Coupling *coupling = nullptr; // never deleted (MPI resources)
+static double injected = 0, sourceX = 0, sourceImpulse = 0;
+
+#ifdef __okl__
+
+#endif
+
+static void dumpParcels(const std::string &name)
+{
+  auto &lpm = coupling->lpm();
+  const int n = lpm.numParticles(), off = lpm.fieldOffset();
+  std::vector<dfloat> x(std::max(off, 1)), y(std::max(off, 1)), z(std::max(off, 1)), v(std::max(off, 1));
+  if (n) {
+    lpm.getDOF("x").copyTo(x.data(), n);
+    lpm.getDOF("y").copyTo(y.data(), n);
+    lpm.getDOF("z").copyTo(z.data(), n);
+    lpm.getDOF("velocity").copyTo(v.data(), n); // first component
+  }
+  std::vector<double> rows;
+  for (int i = 0; i < n; i++) {
+    rows.insert(rows.end(), {x[i], y[i], z[i], v[i]});
+  }
+  gatherRows(rows, 4, name);
+}
+
+void UDF_LoadKernels(deviceKernelProperties &kernelInfo)
+{
+  elgpu::registerKernels(kernelInfo);
+}
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  jp.read();
+}
+
+void UDF_Setup()
+{
+  elgpu::Config cfg;
+  platform->options.getArgs("FLUID DENSITY", cfg.rhof);
+  platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+  cfg.periodic = {true, false, true};
+  cfg.filterWidth = jp.filterWidth;
+  cfg.qtl = jp.qtl != 0;
+  cfg.twoWay = jp.parcelsPerStep > 0; // single-droplet check is one-way
+  coupling = new elgpu::Coupling(nrs, cfg);
+  const auto lo = coupling->domainLo();
+  const auto hi = coupling->domainHi();
+
+  double dt;
+  platform->options.getArgs("DT", dt); // nrs->dt[0] is not set yet in UDF_Setup
+  injector = new JetInjector{jp, hi[2] - lo[2], 0.5 * (lo[1] + hi[1]), dt};
+
+  std::vector<double> x, v, d, rho, w;
+  if (jp.parcelsPerStep == 0 && platform->comm.mpiRank() == 0) {
+    x = {jp.xNozzle, 0.5 * (lo[1] + hi[1]), 0.5 * (lo[2] + hi[2])};
+    v = {jp.uJet, 0, 0};
+    d = {jp.dp};
+    rho = {jp.rhop};
+    w = {1.0};
+  }
+  double t0;
+  platform->options.getArgs("START TIME", t0);
+  coupling->initialize(x, v, d, rho, t0, w);
+  if (platform->comm.mpiRank() == 0) {
+    printf("jet: %d parcels/step, %.3f droplets per parcel, tau_p %.4f\n",
+           jp.parcelsPerStep, jp.weight(dt, hi[2] - lo[2]), jp.rhop * jp.dp * jp.dp / (18 * cfg.mu));
+  }
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  const double dt = nrs->dt[0];
+  if (tstep > 0) {
+    sourceImpulse += dt * sourceX;
+    if (jp.parcelsPerStep > 0) {
+      std::vector<double> x, v, d, rho, w;
+      injector->parcels(x, v, d, rho, w);
+      coupling->inject(x, v, d, rho, w);
+      injected += jp.rhop * jp.liquidPerStep(dt, injector->lz) * jp.uJet;
+    }
+  }
+  coupling->step(time, tstep);
+  const auto tot = coupling->totals();
+  sourceX = tot.source[0];
+
+  if (jp.parcelsPerStep == 0) {
+    auto &lpm = coupling->lpm();
+    if (lpm.numParticles() == 1) {
+      std::vector<dfloat> vx(1), xx(1);
+      lpm.getDOF("velocity").copyTo(vx.data(), 1);
+      lpm.getDOF("x").copyTo(xx.data(), 1);
+      printf("drop: %d %.8e %.10e %.10e\n", tstep, time, vx[0], xx[0]);
+    }
+    return;
+  }
+  if (tstep % jp.reportInterval == 0 || nrs->lastStep) {
+    if (platform->comm.mpiRank() == 0) {
+      printf("jet: step %d  t %.3f  nparcel %lld  Pgas %.6e  Pdrop %.6e  injected %.6e  budget %.3e  fluid %.3e  divErr %.2e\n",
+             tstep, time, tot.nEl, tot.fluidMomentum[0], tot.elMomentum[0], injected,
+             injected > 0 ? (tot.fluidMomentum[0] + tot.elMomentum[0] - injected) / injected : 0.0,
+             injected > 0 ? (tot.fluidMomentum[0] - sourceImpulse) / injected : 0.0, tot.divErrRms);
+    }
+  }
+  if (nrs->lastStep) {
+    dumpField(nrs, "field_final.csv");
+    dumpParcels("parcels_final.csv");
+  }
+}

@@ -45,7 +45,8 @@ inline dfloat elgpuDragCoeff(const dfloat mu, const dfloat rhof, const dfloat dp
   }
 }
 
-// q = (force on the fluid, particle volume, volume flux vol * v) per particle
+// q = (force on the fluid, liquid volume, volume flux vol * v) per parcel
+// of np droplets
 @kernel void elgpuForce(const dlong N,
                         const dlong offset,
                         const int vId,
@@ -53,6 +54,7 @@ inline dfloat elgpuDragCoeff(const dfloat mu, const dfloat rhof, const dfloat dp
                         const dfloat rhof,
                         @ restrict const dfloat *y,
                         @ restrict const dfloat *dp,
+                        @ restrict const dfloat *np,
                         @ restrict const dfloat *U,
                         @ restrict dfloat *q)
 {
@@ -64,8 +66,8 @@ inline dfloat elgpuDragCoeff(const dfloat mu, const dfloat rhof, const dfloat dp
     const dfloat ury = U[n + 1 * offset] - vy;
     const dfloat urz = U[n + 2 * offset] - vz;
     const dfloat d = dp[n];
-    const dfloat vol = ELGPU_PI / 6.0 * d * d * d;
-    const dfloat fd = elgpuDragCoeff(mu, rhof, d, sqrt(urx * urx + ury * ury + urz * urz));
+    const dfloat vol = np[n] * ELGPU_PI / 6.0 * d * d * d;
+    const dfloat fd = np[n] * elgpuDragCoeff(mu, rhof, d, sqrt(urx * urx + ury * ury + urz * urz));
     q[n + 0 * offset] = -fd * urx;
     q[n + 1 * offset] = -fd * ury;
     q[n + 2 * offset] = -fd * urz;

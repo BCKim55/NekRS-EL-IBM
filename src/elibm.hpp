@@ -72,6 +72,7 @@ struct ElParticle {
   vec3 v{};
   double dp = 0;
   double rho = 0;
+  double weight = 1; // droplets per parcel
 };
 
 struct Config {
@@ -86,6 +87,7 @@ struct Config {
   double neighborWidth = 0; // > 0 enables EL-EL contact (>= largest dp)
   int substeps = 1;
   int ioStep = 0; // ppiclF VTU interval in fluid steps (0: none)
+  bool twoWay = true; // false: particles feel the fluid, the fluid not the particles
   bool qtl = true;
   bool zeroMeanDiv = true; // closed or fully periodic domain
 };
@@ -184,11 +186,15 @@ public:
       r[PPICLF_R_JTYPE - 1] = PPICLF_TYPE_EL;
       r[PPICLF_R_JRHOP - 1] = p.rho;
       r[PPICLF_R_JDP - 1] = p.dp;
-      r[PPICLF_R_JVOLP - 1] = M_PI / 6.0 * p.dp * p.dp * p.dp;
+      r[PPICLF_R_JVOLP - 1] = p.weight * M_PI / 6.0 * p.dp * p.dp * p.dp;
       r[PPICLF_R_JID - 1] = elOffset + i;
       push(p.x, p.v, r);
     }
     elList.clear();
+    {
+      long long mine = y0.size() / PPICLF_LRS;
+      MPI_Allreduce(&mine, &nElGlobal, 1, MPI_LONG_LONG, MPI_SUM, comm());
+    }
 
     // markers of every body, created on rank 0
     if (platform->comm.mpiRank() == 0) {
@@ -260,6 +266,36 @@ public:
 
     contactOnBody.assign(bodyList.size(), vec3{});
     updateSources(nullptr);
+  }
+
+  // Add EL parcels during the run (the calling rank creates them; ppiclF
+  // bins them). Collective: every rank must call it, with any count.
+  void inject(const std::vector<ElParticle> &list)
+  {
+    long long offset = list.size();
+    MPI_Exscan(MPI_IN_PLACE, &offset, 1, MPI_LONG_LONG, MPI_SUM, comm());
+    if (platform->comm.mpiRank() == 0) {
+      offset = 0;
+    }
+    std::vector<double> y, rprop;
+    for (size_t i = 0; i < list.size(); i++) {
+      const auto &p = list[i];
+      std::array<double, PPICLF_LRP> r{};
+      r[PPICLF_R_JTYPE - 1] = PPICLF_TYPE_EL;
+      r[PPICLF_R_JRHOP - 1] = p.rho;
+      r[PPICLF_R_JDP - 1] = p.dp;
+      r[PPICLF_R_JVOLP - 1] = p.weight * M_PI / 6.0 * p.dp * p.dp * p.dp;
+      r[PPICLF_R_JID - 1] = nElGlobal + offset + i;
+      y.insert(y.end(), {p.x[0], p.x[1], p.x[2], p.v[0], p.v[1], p.v[2]});
+      rprop.insert(rprop.end(), r.begin(), r.end());
+    }
+    long long total = list.size();
+    MPI_Allreduce(MPI_IN_PLACE, &total, 1, MPI_LONG_LONG, MPI_SUM, comm());
+    nElGlobal += total;
+    int n = list.size();
+    y.push_back(0);
+    rprop.push_back(0);
+    ppiclc_solve_AddParticles(&n, y.data(), rprop.data());
   }
 
   void step(double time, int tstep)
@@ -452,6 +488,7 @@ private:
   Config cfg;
   vec3 lo{}, hi{};
   std::vector<ElParticle> elList;
+  long long nElGlobal = 0;
   std::vector<Body> bodyList;
   std::vector<vec3> contactOnBody;
   std::vector<double> massLocal;
@@ -585,6 +622,10 @@ private:
       MPI_Allreduce(MPI_IN_PLACE, &sum, 1, MPI_DOUBLE, MPI_SUM, comm());
       intProjected[c] = sum;
     }
+    if (!cfg.twoWay) {
+      std::fill(FUel.begin(), FUel.end(), 0.0);
+      std::fill(FUib.begin(), FUib.end(), 0.0);
+    }
     for (int k = 0; k < 3; k++) {
       double sum = 0;
       for (dlong n = 0; n < N; n++) {
@@ -594,7 +635,7 @@ private:
       intSource[k] = sum;
     }
 
-    if (!cfg.qtl) {
+    if (!cfg.qtl || !cfg.twoWay) {
       return;
     }
 
