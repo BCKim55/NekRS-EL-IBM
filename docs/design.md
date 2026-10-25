@@ -215,8 +215,37 @@ First parcel attempt (u_jet = 1, mass loading 10): the gas carried only
 decelerated to the gas speed (~0.5 u_jet) they still carry their mass flux
 times that speed, half of J at this loading. The test therefore needs the
 liquid *mass* flux to be small while J is kept: u_jet = 10, mass loading
-0.01 (parcels keep 0.5 % of J); that run and the step-2 sensitivity runs
-(filter width 0.03/0.06, 40 parcels per step, dt/2) are reported below.
+0.01 (parcels keep 0.5 % of J). The stopping stream is a stronger, more
+concentrated force than the Gaussian blob (J / (w u_jet tau_p) against
+J / (2 pi sigma^2)), so the slot was widened to 0.04 and the gas still
+peaked at 0.76 u_jet-independent units and crossed nekRS's CFL limit at
+dt = 5e-3; the parcel runs use dt = 2.5e-3.
+
+Parcel run (u_jet = 10, w = 0.04, phi_inj = 5e-6, 10 parcels per step, 8000
+steps to t = 20, 11 700 parcels in the domain at the end), window
+0.9 < x < 1.8:
+
+| | parcels | body force |
+|---|---|---|
+| `int u (u - u_co) dy` over the window (set J = 0.02) | 0.0169, constant to 0.3 % | 0.0173, constant to 0.3 % |
+| J from the u_c decay (`u_c^-3` linear in x) | 0.0168 | 0.0165 |
+| virtual origin x0 | 0.572 (nozzle 0.5 + stopping length) | 0.325 |
+| u_c vs Bickley at the measured J, max rel. err | 3.5 % | 3.7 % |
+| half-width vs Bickley, max rel. err | 13 % | 12 % |
+| profile at x = 1.2 | sech^2 (figure) | sech^2 |
+
+The parcel jet carries 2.3 % less than the body-force jet (0.5 % stays with
+the parcels, the rest is the slightly different near field); both reproduce
+the x^-1/3 centreline decay, the sech^2 profile and a momentum flux that is
+constant along the jet. The half-width error of both against Bickley is the
+coflow/confinement (the excess velocity is negative outside the jet, which
+narrows the half-width definition), not the particle coupling: the two
+runs differ from each other by 6 % in b.
+
+Step-2 sensitivity (filter width 0.06, 40 parcels per step; same case to
+t = 15): see the table at the end of this section once the runs complete.
+Filter width 0.03 at dt = 2.5e-3 crossed the CFL limit (a narrower filter
+makes the stopping stream a stronger local force); it needs dt = 1.25e-3.
 
 ## 2c. Round particle-laden jet (`cases/jet_modarress`, prepared)
 

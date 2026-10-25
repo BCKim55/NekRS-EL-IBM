@@ -3,8 +3,8 @@ userSections = CASEDATA
 [GENERAL]
 polynomialOrder = 5
 stopAt = numSteps
-numSteps = 4000
-dt = 5e-3
+numSteps = 8000
+dt = 2.5e-3
 timeStepper = tombo2
 checkpointInterval = 0
 
@@ -29,10 +29,13 @@ u_co = 0.05
 # a liquid mass flux of only J / u_jet, i.e. mass loading 0.01. The parcels
 # stop within ~u_jet tau_p = 0.16 of the nozzle and then ride with the gas
 # (~0.5), keeping only 0.5 % of J; with u_jet = 1 the liquid kept half of J.
+# The slot is 2 w of the ppiclF cases so that the force density of the
+# stopping stream (J / (w u_jet tau_p)) stays near the body-force blob's and
+# the gas stays below the CFL limit at this dt.
 u_jet = 10.0
-w_slot = 0.02
+w_slot = 0.04
 x_nozzle = 0.5
-phi_inj = 1e-5
+phi_inj = 5e-6
 # small droplets: tau_p = 0.028 (Stokes), 0.016 at Re_p = 10
 dp = 0.0005
 rhop = 1000.0
