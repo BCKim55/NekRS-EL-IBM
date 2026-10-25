@@ -242,10 +242,22 @@ coflow/confinement (the excess velocity is negative outside the jet, which
 narrows the half-width definition), not the particle coupling: the two
 runs differ from each other by 6 % in b.
 
-Step-2 sensitivity (filter width 0.06, 40 parcels per step; same case to
-t = 15): see the table at the end of this section once the runs complete.
-Filter width 0.03 at dt = 2.5e-3 crossed the CFL limit (a narrower filter
-makes the stopping stream a stronger local force); it needs dt = 1.25e-3.
+Step-2 sensitivity (same case to t = 15, window 0.9 < x < 1.8, J measured
+at 0.0173 as above):
+
+| run | J(x) mean | J from u_c decay | x0 | u_c vs Bickley | half-width vs Bickley |
+|---|---|---|---|---|---|
+| base: filter 0.04, 10 parcels/step | 0.0169 | 0.0168 | 0.572 | 3.5 % | 13.4 % |
+| filter 0.06 | 0.0169 | 0.0166 | 0.511 | 4.2 % | 15.3 % |
+| 40 parcels/step (47 000 parcels) | 0.0169 | 0.0169 | 0.563 | 2.5 % | 13.4 % |
+
+The far-field jet does not depend on the filter width or the parcel count:
+the momentum flux is identical to three digits and the decay constants agree
+within 1–2 %; the filter only moves the virtual origin (a wider filter spreads
+the source, x0 0.57 → 0.51). Filter width 0.03 at dt = 2.5e-3 crossed the
+CFL limit (a narrower filter makes the stopping stream a stronger local
+force); it needs dt = 1.25e-3 and was not run. A dt check was not run
+either, beyond the two dt that bracket the CFL limit.
 
 ## 2c. Round particle-laden jet (`cases/jet_modarress`, prepared)
 
