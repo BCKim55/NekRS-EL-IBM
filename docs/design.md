@@ -437,7 +437,10 @@ Three checks that the merged code reproduces the codes it was built from:
 the ppiclF library itself before and after `patches/ppiclF`, the ppiclF
 two-way coupling against ppiclF's own host (Nek5000), and the IBM against
 NekIBM. Scripts and inputs: `scripts/ppiclf_regression.py`,
-`cases/settling_twoway/nek5000_reference`, `cases/ibm_fixed_sphere`.
+`cases/settling_twoway/nek5000_reference`, `cases/ibm_fixed_sphere`;
+figure: `scripts/plot_validation.py` → `docs/img/validation.png`.
+
+![validation against the originals](img/validation.png)
 
 ### 5a. ppiclF library, pristine vs patched (ppiclF's own examples)
 
