@@ -8,3 +8,10 @@
 /build/
 cmake.log
 snapshots/
+
+# per-run midplane dumps and the files setup.sh copies into the refinement cases
+cases/*/plane_z0.csv
+cases/*_fine/*.re2
+cases/*_fine/*.box
+cases/*_fine/*.usr
+cases/*_fine/*.udf
