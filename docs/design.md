@@ -591,11 +591,12 @@ gfortran flags and the UDF links `libgfortran`, so everything is built with
 the GNU programming environment:
 
 ```bash
-module reset && module load cpe/25.03 PrgEnv-gnu gcc-native craype-accel-amd-gfx942 \
-  cray-mpich rocm/6.3.1 cmake python/3.12.2 && module unload cray-libsci
+# no cpe/25.03: mixing it with the system default cray-mpich links libmpifort 9.x against libmpi 8.x
+module reset && module load PrgEnv-gnu gcc-native craype-accel-amd-gfx942 \
+  rocm/6.3.1 cmake python/3.12.2 && module unload cray-libsci
 export NEKRS_HOME=/p/lustre5/<user>/nekrs-install
 cd external/nekRS && CC=cc CXX=CC FC=ftn ./build.sh -DCMAKE_INSTALL_PREFIX=$NEKRS_HOME \
-  -DENABLE_HYPRE_GPU=off -DOCCA_ENABLE_CUDA=off -DOCCA_ENABLE_DPCPP=off
+  -DENABLE_HYPRE_GPU=off -DENABLE_ADIOS=off -DOCCA_ENABLE_CUDA=off -DOCCA_ENABLE_DPCPP=off  # ADIOS links the python module's old libzmq
 # cases (ppiclF with the Cray wrappers, one rank per GPU)
 export FC=ftn CC=cc LAUNCHER="flux run --gpus-per-task=1 -n"
 flux alloc -q pdebug -N 1 -B <bank> -t 60m
