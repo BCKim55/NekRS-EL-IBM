@@ -603,6 +603,12 @@ flux alloc -q pdebug -N 1 -B <bank> -t 60m
 scripts/run_case.sh cases/ibm_fixed_sphere sphere 4 --backend HIP --device-id 0  # flux shows one GPU per task
 ```
 
+Measured on one node (4 MI300A): `ibm_fixed_sphere` 0.27 s/step (11x the
+laptop), `ibm_sphere_re100/hires` 1.9 s/step (the host-staged ppiclF side
+dominates at 21M points); both hires cases therefore go through `pbatch` with
+`scripts/tuolumne_batch.sh` (ppiclF pre-built on a login node for the gslib
+download).
+
 NekIBM-resolution inputs for the section 5d comparison are in
 `cases/ibm_sphere_re100/hires` (32 x 60 x 32 elements, N = 7, 21M points,
 markers d/50, FWHM 0.04 d) and `cases/ibm_settling_sphere/hires`
