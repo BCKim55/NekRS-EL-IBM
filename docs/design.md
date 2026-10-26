@@ -430,3 +430,104 @@ ppiclF for the same case (0.24 s vs 2.0 s on 1 rank, 0.09 s vs 0.9 s on 4),
 and nothing in it is host-bound on a GPU except the migration. Only the CPU
 backend has been run so far; the kernels use nothing beyond `@atomic`, which
 nekRS reports as supported on the device.
+
+## 5. Validation against the original ppiclF and NekIBM
+
+Three checks that the merged code reproduces the codes it was built from:
+the ppiclF library itself before and after `patches/ppiclF`, the ppiclF
+two-way coupling against ppiclF's own host (Nek5000), and the IBM against
+NekIBM. Scripts and inputs: `scripts/ppiclf_regression.py`,
+`cases/settling_twoway/nek5000_reference`, `cases/ibm_fixed_sphere`.
+
+### 5a. ppiclF library, pristine vs patched (ppiclF's own examples)
+
+Both libraries built the same way (gfortran, no `-DPPICLC`) and run on
+ppiclF's `examples/stokes_2d` (250 particles per rank, Stokes drag,
+tau_p = 1/9.8, from rest, dt = 1e-4, 10 000 steps) on 1, 2 and 3 ranks, and
+on ppiclF's `tests/test1` (interpolation and projection diagnostics).
+`stokes_2d` has an exact solution, v = -g tau (1 - e^{-t/tau}), so every
+particle is checked (the VTU `TIME` tag is the start of the step; the state
+in the file is one dt later).
+
+| library | ranks | max error in v | max error in displacement | particles off |
+|---|---|---|---|---|
+| pristine | 1 | 3.7e-8 | 3.4e-8 | 0 |
+| pristine | 2, 3 | 1.8e-3 | 1.7e-3 | 1 of 500 / 750 |
+| patched | 1, 2, 3 | 3.7e-8 | 3.4e-8 | 0 |
+
+The pristine library is exact on one rank and loses one particle's RK3
+stage after a bin migration on 2 and 3 ranks (patch 0001, documented in
+section 2); the patched library is exact on every rank count. `test1`
+prints identical diagnostics for both libraries on 1–3 ranks (TimeI error
+9.3e-9, Prjct error 1.3e-8), i.e. patches 0002–0005 change nothing on
+inputs they are not triggered by.
+
+### 5b. Two-way coupling: nekRS + ppiclF vs Nek5000 + original ppiclF
+
+`cases/settling_twoway/nek5000_reference` runs the settling box on Nek5000
+v19 with the unpatched ppiclF and its Nek5000 example wiring (momentum
+source F / (1 - phi_p) / rho from `GetProFldIJKEF`, interpolation and
+`IntegrateParticle` in `userchk`), BDF2, same mesh, dt, filter and
+particle population (different random positions). Budget at the same times
+(4 ranks each; P_f fluid momentum, P_p particle momentum, sum f total drag):
+
+| t | code | P_f | P_p | sum f |
+|---|---|---|---|---|
+| 0.04 | Nek5000 + ppiclF | -5.682e-3 | -1.583e-2 | -0.2306 |
+| 0.04 | nekRS + ppiclF (this repo) | -5.333e-3 | -1.552e-2 | -0.2283 |
+| 0.12 | Nek5000 + ppiclF | -2.974e-2 | -3.389e-2 | -0.3297 |
+| 0.12 | nekRS + ppiclF (this repo) | -2.919e-2 | -3.362e-2 | -0.3300 |
+| 0.20 | Nek5000 + ppiclF | -5.696e-2 | -4.883e-2 | -0.3404 |
+| 0.20 | nekRS + ppiclF (this repo) | -5.631e-2 | -4.851e-2 | -0.3410 |
+
+At t = 0.2 the two codes agree to 1.2 % in fluid momentum, 0.7 % in
+particle momentum and 0.2 % in total drag; the early-time differences are
+larger (6 % in P_f at t = 0.04, when P_f is itself small) and come from the
+different time integrators (BDF2 in Nek5000 against BDF3/EXT in nekRS,
+with the source extrapolated as described in section 1) and the different
+random positions. The device path (`settling_gpu`) sits within the same
+band (section 4). Nek5000's own momentum budget closes to 1 % of the
+gravity impulse (`total` column), nekRS's to 0.1 %.
+
+### 5c. IBM: fixed sphere drag at Re = 10 (`cases/ibm_fixed_sphere`)
+
+NekIBM's `IBM_test/simple` is a fixed sphere (d = 0.01, u_in = 1, nu = 1e-3,
+Re = 10) in a 4d x 4d x 4d box, periodic laterally, inflow/outflow in y.
+`cases/ibm_fixed_sphere` is the same set-up on this repo's IBM
+(`elibm::Body` with the new `fixed` flag, 1963 markers at 4e-4 spacing,
+Gaussian FWHM 8e-4, 20^3 elements, N = 5, dt = 2.5e-4, 200 steps). The
+reported drag coefficient C_d = F_y / (rho u^2 pi d^2 / 8) from the total
+marker force:
+
+| step | t | C_d |
+|---|---|---|
+| 5 | 0.00125 | 11.89 |
+| 20 | 0.005 | 6.11 |
+| 50 | 0.0125 | 4.89 |
+| 100 | 0.025 | 4.73 |
+| 200 | 0.05 | 4.694 |
+
+Reference values for an unbounded sphere at Re = 10: Schiller–Naumann
+4.15, Clift–Grace–Weber standard drag 4.3. The 4d box is not unbounded: the
+sphere sits 2d from the inflow plane and in a laterally periodic array of
+spacing 4d (volume fraction 0.8 %), for which the Stokes-limit array
+correction (Sangani–Acrivos) is a factor 1.5 and the finite-Re correction
+is smaller. The 9–13 % excess over the unbounded correlations is therefore
+the blockage of NekIBM's test box, not an IBM error; the marker slip
+(mean |u - U_body| over the markers, 18 % of u_in) is the diffuse-interface
+velocity left on a one-cell-wide Gaussian interface and is the same
+quantity NekIBM reports as its interface error. Lateral forces are 1e-10,
+as the symmetry demands.
+
+Running NekIBM itself on this machine did not work: the author's build
+targets Intel compilers on a cluster (`lelg` 72 000, `lpmin` 8). With
+gfortran 16 on macOS arm64 it builds (`-std=legacy
+-fallow-argument-mismatch`, `lpmin` 8, short `SESSION.NAME`) but the
+author's `simple` mesh fails Nek's Jacobian check and a regenerated 10^3
+mesh segfaults in Nek's dealiasing interpolation
+(`set_dealias_rx` → `intp_rstd` → `mxm`) on the first step, after the IBM
+initialisation has completed and printed its volume-fraction check; the
+crash is in the Nek5000 v17 core, not in the IBM routines, and persists at
+`-O0` and with a 512 MB main stack. The direct NekIBM-vs-this-repo drag
+comparison therefore still needs a Linux/Intel node; the recipe above is
+what to run there (`IBM_test/simple`, `QP*.dat` column `jf0`).

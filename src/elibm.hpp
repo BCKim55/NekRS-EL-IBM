@@ -60,6 +60,7 @@ using vec3 = std::array<double, 3>;
 struct Body {
   double radius = 0;
   double rho = 0;
+  bool fixed = false; // held in place: markers still force the fluid, the body does not move
   vec3 x{};
   vec3 v{};
   vec3 w{};
@@ -142,6 +143,8 @@ public:
   const vec3 &domainHi() const { return hi; }
   std::vector<Body> &bodies() { return bodyList; }
   double slipRms() const { return slipRmsLast; }
+  // hydrodynamic force on each body (sum of the marker reactions) from the last step
+  const std::vector<vec3> &hydroForceOnBodies() const { return hydroOnBody; }
 
   // Particles given on any rank are created on that rank; ppiclF bins them.
   void addEl(const ElParticle &p) { elList.push_back(p); }
@@ -157,7 +160,7 @@ public:
     const double sigma = cfg.filterWidth / (2 * std::sqrt(2 * std::log(2.0)));
     for (const auto &b : bodyList) {
       const double minRatio = 1 + 3 * std::sqrt(2 * M_PI) * sigma / b.radius;
-      nekrsCheck(b.rho <= minRatio * cfg.rhof,
+      nekrsCheck(!b.fixed && b.rho <= minRatio * cfg.rhof,
                  comm(),
                  EXIT_FAILURE,
                  "IBM body density ratio %g must exceed %g for radius %g and filter width %g\n",
@@ -392,8 +395,15 @@ public:
       MPI_Allreduce(MPI_IN_PLACE, s2, 2, MPI_DOUBLE, MPI_SUM, comm());
       slipRmsLast = s2[1] > 0 ? std::sqrt(s2[0] / s2[1]) : 0;
 
+      hydroOnBody.resize(nb);
       for (size_t b = 0; b < nb; b++) {
         auto &body = bodyList[b];
+        for (int k = 0; k < 3; k++) {
+          hydroOnBody[b][k] = buf[9 * b + k];
+        }
+        if (body.fixed) {
+          continue;
+        }
         const double mEff = (body.rho - cfg.rhof) * body.volume();
         const double iEff = 0.4 * mEff * body.radius * body.radius;
         for (int k = 0; k < 3; k++) {
@@ -490,7 +500,7 @@ private:
   std::vector<ElParticle> elList;
   long long nElGlobal = 0;
   std::vector<Body> bodyList;
-  std::vector<vec3> contactOnBody;
+  std::vector<vec3> contactOnBody, hydroOnBody;
   std::vector<double> massLocal;
   std::vector<double> phifLast;
   std::vector<double> yLoc, rLoc;

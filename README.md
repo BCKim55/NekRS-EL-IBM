@@ -41,6 +41,8 @@ centre 0.47 d_p from the surface, touching at 0.5 d_p).*
 | `scripts/build_ppiclf.sh` | builds a case-specific `libppiclF.a` and `udf.env` |
 | `scripts/run_case.sh` | builds ppiclF for a case and runs it with nekRS |
 | `scripts/plot_collision.py` | figures for the collision demo |
+| `scripts/ppiclf_regression.py` | pristine vs patched ppiclF on ppiclF's own `stokes_2d` example |
+| `cases/settling_twoway/nek5000_reference` | the settling box on Nek5000 v19 + unpatched ppiclF (reference for section 5 of the design doc) |
 | `cases/` | verification cases and the collision demo |
 | `docs/design.md` | model, numerics, ppiclF findings, verification, GPU roadmap |
 
@@ -75,6 +77,7 @@ the shared model in `src/`, or the patches change, and always relinks the UDF.
 | `jet_bickley` | plane laminar jet from a dilute fast parcel stream in an open domain vs the same momentum flux as a body force vs the Bickley similarity solution | momentum flux constant along the jet to 0.3 %, parcels 2.3 % below the body force; centreline decay within 3.5 % of Bickley, sech² profile; insensitive to filter width (0.04 → 0.06) and parcel count (10 → 40 per step) |
 | `tab_breakup` | TAB deformation/breakup on single droplets at We 10–300 | oscillation period within 0.5 % of analytic; no breakup below We 12; breakup time on the Pilch & Erdman initiation curve (1.17 vs 1.21 at We 18) |
 | `jet_modarress` | Modarress (1984) round particle-laden jet, Re 13 300 — set up for a GPU node | coarse-mesh smoke test only (full mesh does not link on macOS arm64) |
+| `ibm_fixed_sphere` | NekIBM's `IBM_test/simple`: fixed sphere at Re 10 in a 4d periodic box, on this repo's IBM | C_d 4.69 vs 4.15–4.3 unbounded (the excess is the 4d-box blockage); lateral force 1e-10 |
 | `el_ibm_collision` | EL particles fired at a free IBM sphere | no particle enters the sphere, the sphere picks up the cloud's momentum (u 0 → 0.27), total momentum within 0.3 %, IBM slip ≈ 2 % of the body speed |
 
 ![Collision demo summary](docs/img/collision_summary.png)
@@ -95,6 +98,7 @@ the shared model in `src/`, or the patches change, and always relinks the UDF.
 - [x] Device EL path (`lpm_t` + projection/filter kernels), two-way + QTL
 - [x] Spray step 1: parcels (`N_p` droplets each) and run-time injection, both paths
 - [x] Spray step 2–3 (device path): TAB deformation drag and breakup, validated on single droplets
+- [x] Validated against the originals (design doc §5): patched ppiclF exact on ppiclF's `stokes_2d` where the pristine one loses a particle on 2+ ranks; nekRS+ppiclF settling within 1 % of Nek5000+ppiclF; IBM sphere drag within blockage of standard drag (NekIBM itself does not run on macOS/gfortran)
 - [ ] KH-RT breakup, dense-regime drag, implicit drag for post-breakup droplets, spray-data validation
 - [ ] IBM–IBM contact, particle–wall contact (ppiclF walls are not wired yet)
 - [ ] Device path: contact (cell list), IBM markers, implicit Helmholtz filter

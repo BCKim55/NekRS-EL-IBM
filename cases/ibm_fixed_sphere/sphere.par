@@ -1,0 +1,32 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+numSteps = 200
+dt = 2.5e-4
+timeStepper = tombo2
+checkpointInterval = 0
+
+[MESH]
+# 20^3 elements on [-0.02,0.02]^3 (NekIBM IBM_test/simple)
+file = "sphere.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-7
+
+[FLUID VELOCITY]
+# 1: inflow uy = 1, 2: outflow
+boundaryTypeMap = udfDirichlet, zeroNeumann
+residualTol = 1e-9
+rho = 1.0
+viscosity = 1e-3
+
+[CASEDATA]
+# fixed sphere, Re = U d / nu = 10
+u_in = 1.0
+diameter = 0.01
+# marker spacing ~ GLL spacing (0.04 / 20 / 5), filter FWHM 2 x that
+marker_spacing = 4e-4
+filter_width = 8e-4
+report_interval = 5
