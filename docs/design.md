@@ -550,6 +550,16 @@ references were run on this repo's IBM with NekIBM's own inputs
 
 ![NekIBM reference cases](img/nekibm_refs.png)
 
+Midplane velocity magnitude of the same runs at their last step
+(`src/fieldDump.hpp` writes `plane_z0.csv`, `scripts/plot_slices.py` plots
+it; red circle = nominal sphere). With the 0.08 d Gaussian the stagnant
+region at Re 10 extends well outside the circle, with 0.04 d it hugs it;
+at Re 100 the standing eddy behind the sphere is about one diameter long
+(Johnson & Patel: 0.87 d); the settling sphere is shown in its own frame
+with the wake behind it.
+
+![midplane slices](img/ibm_slices.png)
+
 | case | NekIBM input | reference | this repo | notes |
 |---|---|---|---|---|
 | settling glass sphere, Ga 49.1, rho_p/rho_f 2.56 | `Set1sphere` (nu 0.005416, d 1/6, g 9.81, 1.2 x 1.2 cross-section periodic) | Mordant & Pinton: Re_t = 41, u_t = 1.332 | u = 1.249 at t = 1 (N = 7, FWHM 0.12 d), 1.244 (N = 8, FWHM 0.10 d); Re 38.4, force at 98 % of the net weight | 6 % slow; filter-insensitive (0.4 %); the 7.2 d lateral period hinders settling by up to 14 % in the Stokes limit (Hasimoto, phi^(1/3) = 0.083), less at Re 41; standard-drag ODE gives 1.427 (Re 44), 7 % above the measurement |

@@ -6,6 +6,7 @@
 // with Johnson & Patel (1999): C_d = 1.09 at Re = 100 (NekIBM's reference).
 
 #include "elibm.hpp"
+#include "fieldDump.hpp"
 
 static double uIn, diameter, markerSpacing, filterWidth;
 static int reportInterval;
@@ -84,5 +85,8 @@ void UDF_ExecuteStep(double time, int tstep)
     if (platform->comm.mpiRank() == 0) {
       printf("sphere: step %d  t %.5f  F %.6e %.6e %.6e  Cd %.4f  slip %.3e\n", tstep, time, f[0], f[1], f[2], cd, coupling->slipRms());
     }
+  }
+  if (nrs->lastStep) {
+    dumpPlane(nrs, "plane_z0.csv", 2, 0.0, 1e-9); // midplane for scripts/plot_slices.py
   }
 }

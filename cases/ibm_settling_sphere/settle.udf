@@ -8,6 +8,7 @@
 // ODE for the approach to it (scripts/settling_reference.py).
 
 #include "elibm.hpp"
+#include "fieldDump.hpp"
 
 static double diameter, rhoBody, gravity, yStart, markerSpacing, filterWidth;
 static int reportInterval;
@@ -65,5 +66,8 @@ void UDF_ExecuteStep(double time, int tstep)
       printf("settle: step %d  t %.4f  y %.5f  v %.6f  Re %.3f  F %.4e %.4e %.4e  slip %.3e\n", tstep, time, b.x[1], b.v[1],
              std::fabs(b.v[1]) * diameter / nu, f[0], f[1], f[2], coupling->slipRms());
     }
+  }
+  if (nrs->lastStep) {
+    dumpPlane(nrs, "plane_z0.csv", 2, 0.0, 1e-9); // midplane for scripts/plot_slices.py
   }
 }

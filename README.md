@@ -42,6 +42,7 @@ centre 0.47 d_p from the surface, touching at 0.5 d_p).*
 | `scripts/run_case.sh` | builds ppiclF for a case and runs it with nekRS |
 | `scripts/plot_collision.py` | figures for the collision demo |
 | `scripts/plot_validation.py` | figure for the validation against the originals |
+| `scripts/plot_slices.py`, `src/fieldDump.hpp` | midplane contours of the IBM reference cases |
 | `scripts/settling_reference.py` | NekIBM's reference cases (settling sphere, Re 100, Re 10 filter width) vs their references |
 | `scripts/ppiclf_regression.py` | pristine vs patched ppiclF on ppiclF's own `stokes_2d` example |
 | `cases/settling_twoway/nek5000_reference` | the settling box on Nek5000 v19 + unpatched ppiclF (reference for section 5 of the design doc) |
@@ -98,6 +99,8 @@ Validation against the original codes (design doc §5): ppiclF before/after the 
 NekIBM's own reference cases (Mordant & Pinton settling sphere, Johnson & Patel Re 100, filter-width bracket at Re 10) on this IBM, design doc §5d:
 
 ![NekIBM reference cases](docs/img/nekibm_refs.png)
+
+![midplane slices of the same runs](docs/img/ibm_slices.png)
 
 ## Status
 
