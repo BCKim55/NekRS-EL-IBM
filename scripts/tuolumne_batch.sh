@@ -13,7 +13,7 @@ module load PrgEnv-gnu gcc-native craype-accel-amd-gfx942 rocm/6.3.1 cmake pytho
 module unload cray-libsci
 export NEKRS_HOME=${NEKRS_HOME:-/p/lustre5/kim149/tuolumne/src/UF/nekrs-install}
 export FC=ftn CC=cc
-export LAUNCHER="flux run --gpus-per-task=1 -n"
+export LAUNCHER="flux run -g 1 -n"
 cd "$root"
 echo "== $(date)  $case_dir $casename on $nranks GPUs, $(hostname)"
 scripts/run_case.sh "$case_dir" "$casename" "$nranks" --backend HIP --device-id 0
