@@ -1,0 +1,14 @@
+base.rea
+-3                     spatial dimension  ( < 0 --> generate .rea/.re2 pair)
+1                      number of fields
+#=======================================================================
+# NekIBM IBM_test/Set1sphere at NekIBM's own resolution: 21 x 180 x 21
+# elements on [-0.6,0.6] x [0,10] x [-0.6,0.6] (7.2 d x 60 d x 7.2 d),
+# fully periodic, sphere d = 1/6 released at y = 9.5
+#=======================================================================
+Box
+-21  -180  -21                                       nelx,nely,nelz
+-0.6 0.6 1.                                          x0,x1,ratio
+0.0 10.0 1.                                          y0,y1,ratio
+-0.6 0.6 1.                                          z0,z1,ratio
+P  ,P  ,P  ,P  ,P  ,P                                bc's  (3 chars each!)

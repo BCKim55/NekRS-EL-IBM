@@ -8,6 +8,8 @@
 # A case without user_routines/ppiclf_user.f uses the shared EL+IBM model
 # (src/ppiclf_user_elibm.f; its PPICLF_USER.h includes PPICLF_ELIBM.h).
 # Writes <build dir>/udf.env with NEKRS_UDF_INCLUDES / NEKRS_UDF_LIBS for the UDF.
+# FC/CC default to the Open MPI wrappers; on Cray set FC=ftn CC=cc (PrgEnv-gnu:
+# the flags below are gfortran's and the UDF links libgfortran).
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -42,7 +44,7 @@ if [ ! -f "$src/source/libppiclF.a" ] || [ "$(cat "$src/.stamp" 2>/dev/null)" !=
   echo "$stamp" > "$src/.stamp"
 fi
 
-fortran_libs=$("$FC" --showme:link 2>/dev/null | tr ' ' '\n' | grep -E '^-(L|l)' | paste -sd ';' - || true)
+fortran_libs=$("$FC" --showme:link 2>/dev/null | tr ' ' '\n' | grep -E '^-(L|l)' | paste -sd ';' - || true) # Open MPI only; Cray wrappers add their libs themselves
 gfortran_dir=$(dirname "$("$FC" -print-file-name=libgfortran.a)")
 cat > "$out/udf.env" <<EOF
 export NEKRS_UDF_INCLUDES="$root/src;$user;$(dirname "$user");$src/source"

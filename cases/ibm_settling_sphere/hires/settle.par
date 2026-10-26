@@ -1,0 +1,35 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 7
+stopAt = numSteps
+numSteps = 2000
+dt = 1e-3
+timeStepper = tombo2
+checkpointInterval = 2000
+
+[MESH]
+# NekIBM resolution: 21 x 180 x 21 elements on height 10 (60 d), N = 7; GPU node
+file = "settle.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-7
+
+[FLUID VELOCITY]
+residualTol = 1e-9
+rho = 1.0
+# NekIBM Set1sphere: nu = 0.005416368 with d = 1/6, rho_p/rho_f = 2.56,
+# g = 9.81 -> Ga = sqrt((rho_p/rho_f - 1) g d^3) / nu = 49.1, i.e. the
+# 0.5 mm glass bead in water of Mordant & Pinton (2000): Re_t = 41,
+# u_t = 0.074 m/s (length scale 3 mm, velocity scale 0.0556 m/s)
+viscosity = 0.005416368
+
+[CASEDATA]
+diameter = 0.16666666667
+rho_body = 2.56
+gravity = 9.81
+y0 = 9.5
+# marker spacing d/20 as NekIBM (n_dh = 20), FWHM 2 x that = 0.1 d
+marker_spacing = 0.00833
+filter_width = 0.0167
+report_interval = 20

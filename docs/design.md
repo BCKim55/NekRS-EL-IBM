@@ -582,3 +582,29 @@ where 4 ranks pass; a Re 100 run at N = 6 with dt = 2.5e-4 reached CFL > 1
 on the element-edge GLL spacing and blew up at step 120 (dt = 2e-4 at N = 5
 is stable); the nek interface data must stay under 2 GB per rank on macOS
 arm64 (lelt x lx1^3 below about 6.5e5).
+
+## 6. Running on Tuolumne (LLNL, MI300A, flux)
+
+nekRS has no official recipe for Tuolumne; the Frontier `PrgEnv-gnu` one
+(nekRS_HPCsupport) works with the gfx942 target. The ppiclF build script uses
+gfortran flags and the UDF links `libgfortran`, so everything is built with
+the GNU programming environment:
+
+```bash
+module reset && module load cpe/25.03 PrgEnv-gnu gcc-native craype-accel-amd-gfx942 \
+  cray-mpich rocm/6.3.1 cmake python/3.12.2 && module unload cray-libsci
+export NEKRS_HOME=/p/lustre5/<user>/nekrs-install
+cd external/nekRS && CC=cc CXX=CC FC=ftn ./build.sh -DCMAKE_INSTALL_PREFIX=$NEKRS_HOME \
+  -DENABLE_HYPRE_GPU=off -DOCCA_ENABLE_CUDA=off -DOCCA_ENABLE_DPCPP=off
+# cases (ppiclF with the Cray wrappers, one rank per GPU)
+export FC=ftn CC=cc LAUNCHER="flux run --gpus-per-task=1 -n"
+flux alloc -q pdebug -N 1 -B <bank> -t 60m
+scripts/run_case.sh cases/ibm_fixed_sphere sphere 4 --backend HIP
+```
+
+NekIBM-resolution inputs for the section 5d comparison are in
+`cases/ibm_sphere_re100/hires` (32 x 60 x 32 elements, N = 7, 21M points,
+markers d/50, FWHM 0.04 d) and `cases/ibm_settling_sphere/hires`
+(21 x 180 x 21 elements on the 60 d column, N = 7, 28M points, markers d/20
+as NekIBM's `n_dh = 20`, FWHM 0.1 d). The `.re2` meshes are committed
+(13 and 17 MB) because genbox is not available there.

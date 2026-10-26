@@ -1,0 +1,32 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 7
+stopAt = numSteps
+numSteps = 2000
+dt = 5e-5
+timeStepper = tombo2
+checkpointInterval = 2000
+
+[MESH]
+# NekIBM resolution: 32 x 60 x 32 elements, N = 7 (21M points); GPU node
+file = "sphere.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-7
+
+[FLUID VELOCITY]
+# 1: inflow uy = 1, 2: outflow
+boundaryTypeMap = udfDirichlet, zeroNeumann
+residualTol = 1e-9
+rho = 1.0
+viscosity = 1e-4
+
+[CASEDATA]
+# fixed sphere, Re = U d / nu = 100; Johnson & Patel (1999) C_d = 1.09
+u_in = 1.0
+diameter = 0.01
+# marker spacing ~ 0.6 x mean GLL spacing (0.0025 / 7), FWHM 2 x that = 0.04 d
+marker_spacing = 2e-4
+filter_width = 4e-4
+report_interval = 50

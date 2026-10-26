@@ -4,6 +4,9 @@
 #   scripts/run_case.sh <case dir> <casename> [nranks] [extra nekrs args]
 #
 # NEKRS_HOME must point at a nekRS install built from external/nekRS.
+# LAUNCHER (default "mpirun -np") is prefixed to the rank count, e.g.
+#   LAUNCHER="flux run --gpus-per-task=1 -n" on a flux cluster,
+#   LAUNCHER="srun -n" on slurm.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -29,4 +32,4 @@ fi
 cd "$case_dir"
 # nekRS rebuilds the UDF only when the .udf changes, not when libppiclF.a does
 rm -rf .cache/udf
-mpirun -np "$nranks" "$NEKRS_HOME/bin/nekrs" --setup "$casename.par" "$@"
+${LAUNCHER:-mpirun -np} "$nranks" "$NEKRS_HOME/bin/nekrs" --setup "$casename.par" "$@"

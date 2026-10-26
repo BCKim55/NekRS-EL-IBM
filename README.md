@@ -62,6 +62,8 @@ git clone --recursive https://github.com/BCKim55/NekRS-EL-IBM.git
 cd NekRS-EL-IBM
 export NEKRS_HOME=$HOME/.local/nekrs
 export OMPI_CXX=g++-16            # whatever built nekRS
+# Cray EX (Tuolumne, Frontier): PrgEnv-gnu, FC=ftn CC=cc for the ppiclF build and
+# LAUNCHER="flux run --gpus-per-task=1 -n" (or "srun -n"); see docs/design.md §6
 scripts/run_case.sh cases/el_ibm_collision collision 4 --backend CPU
 python3 scripts/plot_collision.py cases/el_ibm_collision
 ```
