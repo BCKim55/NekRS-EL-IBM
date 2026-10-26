@@ -1,0 +1,69 @@
+// A single heavy sphere settling from rest in quiescent fluid, the NekIBM
+// IBM_test/Set1sphere case (= the 0.5 mm glass bead in water of Mordant &
+// Pinton 2000, Ga = 49, rho_p/rho_f = 2.56) on our IBM (src/elibm.hpp).
+// Fully periodic box as in NekIBM, 18 d tall instead of 60 d. Reports the
+// body position, velocity, Re = |v| d / nu and the hydrodynamic force every
+// report_interval steps (lines "settle:"); the reference is the measured
+// terminal velocity, Re_t = 41 (u_t = 0.074 m/s), and the standard-drag
+// ODE for the approach to it (scripts/settling_reference.py).
+
+#include "elibm.hpp"
+
+static double diameter, rhoBody, gravity, yStart, markerSpacing, filterWidth;
+static int reportInterval;
+static elibm::Coupling *coupling = nullptr; // never deleted (MPI resources)
+
+#ifdef __okl__
+// fully periodic: no boundary kernels
+#endif
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  platform->par->extract("casedata", "diameter", diameter);
+  platform->par->extract("casedata", "rho_body", rhoBody);
+  platform->par->extract("casedata", "gravity", gravity);
+  platform->par->extract("casedata", "y0", yStart);
+  platform->par->extract("casedata", "marker_spacing", markerSpacing);
+  platform->par->extract("casedata", "filter_width", filterWidth);
+  platform->par->extract("casedata", "report_interval", reportInterval);
+}
+
+void UDF_Setup()
+{
+  elibm::Config cfg;
+  platform->options.getArgs("FLUID DENSITY", cfg.rhof);
+  platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+  cfg.periodic = {true, true, true};
+  cfg.grav = {0.0, -gravity, 0.0}; // buoyancy is in the body's effective mass
+  cfg.filterWidth = filterWidth;
+  cfg.markerSpacing = markerSpacing;
+  cfg.qtl = false;
+  coupling = new elibm::Coupling(nrs, cfg);
+
+  elibm::Body body;
+  body.radius = 0.5 * diameter;
+  body.rho = rhoBody;
+  body.x = {0.0, yStart, 0.0};
+  coupling->addBody(body);
+  coupling->initialize();
+  const auto tot = coupling->totals(); // collective: every rank
+  if (platform->comm.mpiRank() == 0) {
+    const double ga = std::sqrt((rhoBody / cfg.rhof - 1.0) * gravity * diameter * diameter * diameter) / cfg.mu;
+    printf("settle: Ga %.2f  rho ratio %.3f  markers %lld\n", ga, rhoBody / cfg.rhof, tot.nMarker);
+  }
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  coupling->step(time, tstep);
+  if (tstep > 0 && (tstep % reportInterval == 0 || nrs->lastStep)) {
+    double nu;
+    platform->options.getArgs("FLUID VISCOSITY", nu);
+    const auto &b = coupling->bodies()[0];
+    const auto f = coupling->hydroForceOnBodies()[0];
+    if (platform->comm.mpiRank() == 0) {
+      printf("settle: step %d  t %.4f  y %.5f  v %.6f  Re %.3f  F %.4e %.4e %.4e  slip %.3e\n", tstep, time, b.x[1], b.v[1],
+             std::fabs(b.v[1]) * diameter / nu, f[0], f[1], f[2], coupling->slipRms());
+    }
+  }
+}

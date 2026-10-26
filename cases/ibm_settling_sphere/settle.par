@@ -1,0 +1,36 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 7
+stopAt = numSteps
+numSteps = 500
+dt = 2e-3
+timeStepper = tombo2
+checkpointInterval = 0
+
+[MESH]
+# 10 x 25 x 10 elements on [-0.6,0.6] x [0,3] x [-0.6,0.6], fully periodic
+# (NekIBM Set1sphere: 21 x 180 x 21 on height 10, N = 7)
+file = "settle.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-7
+
+[FLUID VELOCITY]
+residualTol = 1e-9
+rho = 1.0
+# NekIBM Set1sphere: nu = 0.005416368 with d = 1/6, rho_p/rho_f = 2.56,
+# g = 9.81 -> Ga = sqrt((rho_p/rho_f - 1) g d^3) / nu = 49.1, i.e. the
+# 0.5 mm glass bead in water of Mordant & Pinton (2000): Re_t = 41,
+# u_t = 0.074 m/s (length scale 3 mm, velocity scale 0.0556 m/s)
+viscosity = 0.005416368
+
+[CASEDATA]
+diameter = 0.16666666667
+rho_body = 2.56
+gravity = 9.81
+y0 = 2.1
+# marker spacing ~ 0.6 x mean GLL spacing (0.12 / 7), filter FWHM 2 x that
+marker_spacing = 0.01
+filter_width = 0.02
+report_interval = 5

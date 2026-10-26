@@ -534,3 +534,41 @@ crash is in the Nek5000 v17 core, not in the IBM routines, and persists at
 `-O0` and with a 512 MB main stack. The direct NekIBM-vs-this-repo drag
 comparison therefore still needs a Linux/Intel node; the recipe above is
 what to run there (`IBM_test/simple`, `QP*.dat` column `jf0`).
+
+### 5d. IBM against NekIBM's own reference data
+
+NekIBM's paper (Yang & Balachandar, J. Supercomput. 77, 2897, 2021) is
+behind a paywall and its figures could not be read; its reference list and
+`IBM_test` inputs show what it validated against: Johnson & Patel (1999) for
+the fixed sphere, Mordant & Pinton (2000) for a settling sphere, and the
+Richardson–Zaki / Yin–Koch correlations for clouds. The two single-sphere
+references were run on this repo's IBM with NekIBM's own inputs
+(`cases/ibm_sphere_re100`, `cases/ibm_settling_sphere`, refinements in
+`*_fine`), at the resolution a laptop allows (NekIBM's Set1sphere mesh has
+79 380 elements at N = 7); figure `scripts/settling_reference.py` →
+`docs/img/nekibm_refs.png`.
+
+![NekIBM reference cases](img/nekibm_refs.png)
+
+| case | NekIBM input | reference | this repo | notes |
+|---|---|---|---|---|
+| settling glass sphere, Ga 49.1, rho_p/rho_f 2.56 | `Set1sphere` (nu 0.005416, d 1/6, g 9.81, 1.2 x 1.2 cross-section periodic) | Mordant & Pinton: Re_t = 41, u_t = 1.332 | u = 1.249 at t = 1 (N = 7, FWHM 0.12 d), 1.244 (N = 8, FWHM 0.10 d); Re 38.4, force at 98 % of the net weight | 6 % slow; filter-insensitive (0.4 %); the 7.2 d lateral period hinders settling by up to 14 % in the Stokes limit (Hasimoto, phi^(1/3) = 0.083), less at Re 41; standard-drag ODE gives 1.427 (Re 44), 7 % above the measurement |
+| fixed sphere, Re 100 | `fixsphere/Re100` box (8d x 15d x 8d, inflow/outflow in y, periodic x, z) | Johnson & Patel: C_d = 1.09 | C_d = 1.286 at U t/d = 10 (N = 5, FWHM 0.12 d, 16 x 30 x 16 elements; NekIBM: 32 x 60 x 32, N = 7) | +18 %: diffuse-interface drag, see Re 10 |
+| fixed sphere, Re 10 | `simple` box (4d)^3 | standard drag 4.15–4.3 | C_d = 4.69 with FWHM 0.08 d (two GLL spacings, marker slip 18 %), 4.09 with FWHM 0.04 d (one spacing, slip 31 %) | the two widths bracket the reference: a wide Gaussian enlarges the body, a one-cell one under-enforces no-slip; converging needs a finer grid, not a narrower filter |
+
+What this shows: with NekIBM's own set-ups the IBM reproduces the reference
+drag and settling velocity to 6–18 %, with the sign and size expected from
+the Gaussian interface width at d/10 resolution (fixed spheres) and from the
+periodic-array hindrance of NekIBM's narrow column (settling). NekIBM's
+published runs use half the marker spacing (`n_dh` = 20) on a mesh 4–30x
+larger, which is what a quantitative match needs; the inputs here are set up
+for that on a cluster. The paper's numbers were not available, so the
+comparison is to the experiments and correlations NekIBM itself used.
+
+Practical findings on the way: nekRS's mesh repair (`xyz repair`) diverges
+and the Jacobian check aborts when a case's `.re2`/`.usr` are symlinks, and
+on these periodic genbox meshes some 8-rank partitions failed the same way
+where 4 ranks pass; a Re 100 run at N = 6 with dt = 2.5e-4 reached CFL > 1
+on the element-edge GLL spacing and blew up at step 120 (dt = 2e-4 at N = 5
+is stable); the nek interface data must stay under 2 GB per rank on macOS
+arm64 (lelt x lx1^3 below about 6.5e5).

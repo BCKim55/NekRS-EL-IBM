@@ -1,0 +1,88 @@
+// Fixed sphere in a uniform stream, the NekIBM IBM_test/fixsphere/Re100 box on our
+// IBM (src/elibm.hpp, ppiclF markers, no EL particles): d = 0.01 at the
+// origin of an 8d x 15d x 8d box, inflow u_y = 1, Re = 100. Reports the
+// hydrodynamic force on the sphere and C_d = F_y / (0.5 rho U^2 pi d^2/4)
+// every report_interval steps for the comparison with NekIBM's QP*.dat and
+// with Johnson & Patel (1999): C_d = 1.09 at Re = 100 (NekIBM's reference).
+
+#include "elibm.hpp"
+
+static double uIn, diameter, markerSpacing, filterWidth;
+static int reportInterval;
+static elibm::Coupling *coupling = nullptr; // never deleted (MPI resources)
+
+#ifdef __okl__
+
+void udfDirichlet(bcData *bc)
+{
+  if (isField("fluid velocity")) {
+    bc->uxFluid = 0.0;
+    bc->uyFluid = p_uIn;
+    bc->uzFluid = 0.0;
+  }
+  if (isField("fluid pressure")) {
+    const dfloat iU0delta = 10.0;
+    const dfloat un = bc->uxFluid * bc->nx + bc->uyFluid * bc->ny + bc->uzFluid * bc->nz;
+    const dfloat s0 = 0.5 * (1.0 - tanh(un * iU0delta));
+    bc->pFluid = -0.5 * (bc->uxFluid * bc->uxFluid + bc->uyFluid * bc->uyFluid + bc->uzFluid * bc->uzFluid) * s0;
+  }
+}
+
+#endif
+
+void UDF_LoadKernels(deviceKernelProperties &kernelInfo)
+{
+  platform->par->extract("casedata", "u_in", uIn);
+  kernelInfo.define("p_uIn") = uIn;
+}
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  platform->par->extract("casedata", "u_in", uIn);
+  platform->par->extract("casedata", "diameter", diameter);
+  platform->par->extract("casedata", "marker_spacing", markerSpacing);
+  platform->par->extract("casedata", "filter_width", filterWidth);
+  platform->par->extract("casedata", "report_interval", reportInterval);
+}
+
+void UDF_Setup()
+{
+  auto mesh = nrs->meshV;
+  const auto offset = nrs->fluid->fieldOffset;
+  std::vector<dfloat> U(3 * offset, 0.0);
+  std::fill(U.begin() + offset, U.begin() + offset + mesh->Nlocal, uIn); // start from the uniform stream
+  nrs->fluid->o_U.copyFrom(U.data(), 3 * offset);
+
+  elibm::Config cfg;
+  platform->options.getArgs("FLUID DENSITY", cfg.rhof);
+  platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+  cfg.periodic = {true, false, true};
+  cfg.filterWidth = filterWidth;
+  cfg.markerSpacing = markerSpacing;
+  cfg.qtl = false;
+  coupling = new elibm::Coupling(nrs, cfg);
+
+  elibm::Body body;
+  body.radius = 0.5 * diameter;
+  body.rho = 1.0;
+  body.fixed = true;
+  body.x = {0.0, 0.0, 0.0};
+  coupling->addBody(body);
+  coupling->initialize();
+  const auto tot = coupling->totals(); // collective: every rank
+  if (platform->comm.mpiRank() == 0) {
+    printf("sphere: Re %.1f  markers %lld\n", uIn * diameter / cfg.mu, tot.nMarker);
+  }
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  coupling->step(time, tstep);
+  if (tstep > 0 && (tstep % reportInterval == 0 || nrs->lastStep)) {
+    const auto f = coupling->hydroForceOnBodies()[0];
+    const double cd = f[1] / (0.5 * 1.0 * uIn * uIn * M_PI * diameter * diameter / 4.0);
+    if (platform->comm.mpiRank() == 0) {
+      printf("sphere: step %d  t %.5f  F %.6e %.6e %.6e  Cd %.4f  slip %.3e\n", tstep, time, f[0], f[1], f[2], cd, coupling->slipRms());
+    }
+  }
+}

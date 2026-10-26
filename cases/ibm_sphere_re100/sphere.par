@@ -1,0 +1,36 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+numSteps = 500
+dt = 2e-4
+timeStepper = tombo2
+checkpointInterval = 0
+
+[MESH]
+# 16 x 30 x 16 elements on [-0.04,0.04] x [-0.075,0.075] x [-0.04,0.04]
+# (NekIBM IBM_test/fixsphere/Re100 box; NekIBM used 32 x 60 x 32, N = 7);
+# 4 ranks (8-rank runs of these periodic genbox meshes sometimes fail nekRS's
+# connectivity: "xyz repair" diverges and the Jacobian check aborts);
+# dt = 2e-4 keeps CFL ~ 0.5 on the element-edge GLL spacing (2.5e-4 at N = 6 blew up)
+file = "sphere.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-7
+
+[FLUID VELOCITY]
+# 1: inflow uy = 1, 2: outflow
+boundaryTypeMap = udfDirichlet, zeroNeumann
+residualTol = 1e-9
+rho = 1.0
+viscosity = 1e-4
+
+[CASEDATA]
+# fixed sphere, Re = U d / nu = 100; Johnson & Patel (1999) C_d = 1.09
+u_in = 1.0
+diameter = 0.01
+# marker spacing ~ 0.6 x mean GLL spacing (0.005 / 5), filter FWHM 2 x that
+marker_spacing = 6e-4
+filter_width = 1.2e-3
+report_interval = 10
