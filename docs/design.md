@@ -600,7 +600,7 @@ cd external/nekRS && CC=cc CXX=CC FC=ftn ./build.sh -DCMAKE_INSTALL_PREFIX=$NEKR
 # cases (ppiclF with the Cray wrappers, one rank per GPU)
 export FC=ftn CC=cc LAUNCHER="flux run --gpus-per-task=1 -n"
 flux alloc -q pdebug -N 1 -B <bank> -t 60m
-scripts/run_case.sh cases/ibm_fixed_sphere sphere 4 --backend HIP
+scripts/run_case.sh cases/ibm_fixed_sphere sphere 4 --backend HIP --device-id 0  # flux shows one GPU per task
 ```
 
 NekIBM-resolution inputs for the section 5d comparison are in
