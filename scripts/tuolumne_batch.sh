@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Batch job for one case on Tuolumne (LLNL, MI300A, flux). Submit with e.g.
-#   flux batch -q pbatch -N 1 -B ufl -t 2h -n 4 --gpus-per-task=1 \
+#   flux batch -q pbatch -N 1 -B ufl -t 3h -n 4 -g 1 \
 #     --output=build/<name>.out scripts/tuolumne_batch.sh <case dir> <casename> [nranks]
 # The ppiclF library must already be built on a login node (gslib download):
 #   FC=ftn CC=cc scripts/build_ppiclf.sh <case dir>/user_routines build/<case dir basename>
