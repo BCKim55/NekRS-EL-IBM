@@ -15,3 +15,4 @@ cases/*_fine/*.re2
 cases/*_fine/*.box
 cases/*_fine/*.usr
 cases/*_fine/*.udf
+*.pvsm
