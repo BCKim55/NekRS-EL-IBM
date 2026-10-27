@@ -49,6 +49,7 @@ centre 0.47 d_p from the surface, touching at 0.5 d_p).*
 | `cases/settling_twoway/nek5000_reference` | the settling box on Nek5000 v19 + unpatched ppiclF (reference for section 5 of the design doc) |
 | `cases/` | verification cases and the collision demo |
 | `docs/design.md` | model, numerics, ppiclF findings, verification, GPU roadmap |
+| `docs/validation.md` | every verification/validation check (V1–V12): set-up, reference, commands, results, what each shows |
 
 ## Build and run
 
