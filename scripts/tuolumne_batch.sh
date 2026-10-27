@@ -3,7 +3,7 @@
 #   flux batch -q pbatch -N 1 -B ufl -t 3h -n 4 -g 1 \
 #     --output=build/<name>.out scripts/tuolumne_batch.sh <case dir> <casename> [nranks]
 # The ppiclF library must already be built on a login node (gslib download):
-#   FC=ftn CC=cc scripts/build_ppiclf.sh <case dir>/user_routines build/<case dir basename>
+#   FC=ftn CC=cc scripts/build_ppiclf.sh <case dir>/user_routines build/<case dir with / as _>, e.g. build/ibm_sphere_re100_hires
 set -euo pipefail
 case_dir=$1; casename=$2; nranks=${3:-4}
 # flux batch copies the script elsewhere, so locate the repo by the submission cwd

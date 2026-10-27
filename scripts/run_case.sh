@@ -5,7 +5,7 @@
 #
 # NEKRS_HOME must point at a nekRS install built from external/nekRS.
 # LAUNCHER (default "mpirun -np") is prefixed to the rank count, e.g.
-#   LAUNCHER="flux run --gpus-per-task=1 -n" on a flux cluster,
+#   LAUNCHER="flux run -g 1 -n" on a flux cluster,
 #   LAUNCHER="srun -n" on slurm.
 set -euo pipefail
 
@@ -16,7 +16,9 @@ nranks=${3:-1}
 shift $(( $# < 3 ? $# : 3 ))
 
 : "${NEKRS_HOME:?set NEKRS_HOME to the nekRS install}"
-build="$root/build/$(basename "$case_dir")"
+# one build dir per case: cases/a/b -> build/a_b (so two "hires" cases do not collide)
+rel=${case_dir#"$root"/cases/}; rel=${rel#"$root"/}
+build="$root/build/${rel//\//_}"
 mkdir -p "$root/build"
 
 if [ -f "$case_dir/user_routines/PPICLF_USER.h" ]; then
