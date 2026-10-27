@@ -83,7 +83,7 @@ the shared model in `src/`, or the patches change, and always relinks the UDF.
 | `tab_breakup` | TAB deformation/breakup on single droplets at We 10–300 | oscillation period within 0.5 % of analytic; no breakup below We 12; breakup time on the Pilch & Erdman initiation curve (1.17 vs 1.21 at We 18) |
 | `jet_modarress` | Modarress (1984) round particle-laden jet, Re 13 300 — set up for a GPU node | coarse-mesh smoke test only (full mesh does not link on macOS arm64) |
 | `ibm_fixed_sphere` | NekIBM's `IBM_test/simple`: fixed sphere at Re 10 in a 4d periodic box, on this repo's IBM | C_d 4.69 vs 4.15–4.3 unbounded (the excess is the 4d-box blockage); lateral force 1e-10 |
-| `ibm_sphere_re100`, `ibm_settling_sphere` (+ `_fine`) | NekIBM's own reference cases on this IBM: fixed sphere Re 100 (Johnson & Patel 1.09) and the Mordant & Pinton settling glass sphere (Ga 49, Re_t 41) | C_d 1.29 (+18 %, diffuse interface at d/10); u_t 6 % slow (7.2 d periodic column), filter-insensitive; see design doc §5d |
+| `ibm_sphere_re100`, `ibm_settling_sphere` (+ `_fine`) | NekIBM's own reference cases on this IBM: fixed sphere Re 100 (Johnson & Patel 1.09) and the Mordant & Pinton settling glass sphere (Ga 49, Re_t 41) | C_d 1.29 (+18 %, diffuse interface at d/10) on the laptop grid, 1.20 (+10 %) on NekIBM's mesh (`hires`, Tuolumne, 8 MI300A); u_t 6 % slow (7.2 d periodic column), filter-insensitive; see design doc §5d, §6 |
 | `el_ibm_collision` | EL particles fired at a free IBM sphere | no particle enters the sphere, the sphere picks up the cloud's momentum (u 0 → 0.27), total momentum within 0.3 %, IBM slip ≈ 2 % of the body speed |
 
 ![Collision demo summary](docs/img/collision_summary.png)
@@ -98,7 +98,7 @@ Validation against the original codes (design doc §5): ppiclF before/after the 
 
 ![validation against the originals](docs/img/validation.png)
 
-NekIBM's own reference cases (Mordant & Pinton settling sphere, Johnson & Patel Re 100, filter-width bracket at Re 10) on this IBM, design doc §5d:
+NekIBM's own reference cases (Mordant & Pinton settling sphere, Johnson & Patel Re 100 on the laptop grid and on NekIBM's mesh on Tuolumne, filter-width bracket at Re 10) on this IBM, design doc §5d:
 
 ![NekIBM reference cases](docs/img/nekibm_refs.png)
 

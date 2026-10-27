@@ -1,0 +1,85 @@
+sphere: Re 100.0  markers 7854
+step=49       elapsedStep= 1.11e+00s  elapsedStepSum= 6.07777e+01s
+sphere: step 50  t 0.00250  F 1.182673e-09 1.299899e-04 1.318662e-10  Cd 3.3102  slip 6.513e-02
+step=98       elapsedStep= 1.11e+00s  elapsedStepSum= 1.15294e+02s
+sphere: step 100  t 0.00500  F 3.887747e-10 6.717623e-05 -1.052053e-10  Cd 1.7106  slip 3.774e-02
+step=147      elapsedStep= 1.10e+00s  elapsedStepSum= 1.69698e+02s
+sphere: step 150  t 0.00750  F 3.321725e-10 5.792661e-05 -2.679977e-10  Cd 1.4751  slip 3.403e-02
+step=196      elapsedStep= 1.10e+00s  elapsedStepSum= 2.23827e+02s
+sphere: step 200  t 0.01000  F 3.131405e-10 5.514690e-05 -3.042037e-10  Cd 1.4043  slip 3.254e-02
+step=245      elapsedStep= 1.10e+00s  elapsedStepSum= 2.77817e+02s
+sphere: step 250  t 0.01250  F 2.956353e-10 5.379340e-05 -3.141096e-10  Cd 1.3698  slip 3.164e-02
+step=294      elapsedStep= 1.10e+00s  elapsedStepSum= 3.31822e+02s
+sphere: step 300  t 0.01500  F 2.785322e-10 5.289791e-05 -3.170167e-10  Cd 1.3470  slip 3.101e-02
+step=343      elapsedStep= 1.10e+00s  elapsedStepSum= 3.85825e+02s
+sphere: step 350  t 0.01750  F 2.620028e-10 5.219330e-05 -3.169035e-10  Cd 1.3291  slip 3.053e-02
+step=392      elapsedStep= 1.10e+00s  elapsedStepSum= 4.39792e+02s
+sphere: step 400  t 0.02000  F 2.460913e-10 5.159524e-05 -3.152846e-10  Cd 1.3139  slip 3.015e-02
+step=441      elapsedStep= 1.11e+00s  elapsedStepSum= 4.93833e+02s
+sphere: step 450  t 0.02250  F 2.309188e-10 5.107446e-05 -3.128949e-10  Cd 1.3006  slip 2.985e-02
+step=490      elapsedStep= 1.10e+00s  elapsedStepSum= 5.47929e+02s
+sphere: step 500  t 0.02500  F 2.164691e-10 5.061802e-05 -3.101245e-10  Cd 1.2890  slip 2.959e-02
+>>> runtime statistics (step= 500  totalElapsed= 820.293s):
+step=538      elapsedStep= 1.14e+00s  elapsedStepSum= 6.00980e+02s
+sphere: step 550  t 0.02750  F 2.027767e-10 5.021757e-05 -3.071316e-10  Cd 1.2788  slip 2.937e-02
+step=587      elapsedStep= 1.10e+00s  elapsedStepSum= 6.55134e+02s
+sphere: step 600  t 0.03000  F 1.898409e-10 4.986616e-05 -3.040298e-10  Cd 1.2698  slip 2.919e-02
+step=636      elapsedStep= 1.11e+00s  elapsedStepSum= 7.09273e+02s
+sphere: step 650  t 0.03250  F 1.776688e-10 4.955750e-05 -3.007483e-10  Cd 1.2620  slip 2.903e-02
+step=685      elapsedStep= 1.10e+00s  elapsedStepSum= 7.63387e+02s
+sphere: step 700  t 0.03500  F 1.662929e-10 4.928596e-05 -2.975400e-10  Cd 1.2551  slip 2.889e-02
+step=734      elapsedStep= 1.13e+00s  elapsedStepSum= 8.17622e+02s
+sphere: step 750  t 0.03750  F 1.557018e-10 4.904657e-05 -2.942438e-10  Cd 1.2490  slip 2.877e-02
+step=783      elapsedStep= 1.13e+00s  elapsedStepSum= 8.71898e+02s
+sphere: step 800  t 0.04000  F 1.458811e-10 4.883501e-05 -2.909267e-10  Cd 1.2436  slip 2.867e-02
+step=832      elapsedStep= 1.10e+00s  elapsedStepSum= 9.26239e+02s
+sphere: step 850  t 0.04250  F 1.368014e-10 4.864759e-05 -2.876798e-10  Cd 1.2388  slip 2.858e-02
+step=881      elapsedStep= 1.10e+00s  elapsedStepSum= 9.80565e+02s
+sphere: step 900  t 0.04500  F 1.285321e-10 4.848114e-05 -2.844721e-10  Cd 1.2346  slip 2.850e-02
+step=930      elapsedStep= 1.14e+00s  elapsedStepSum= 1.03499e+03s
+sphere: step 950  t 0.04750  F 1.209615e-10 4.833298e-05 -2.813661e-10  Cd 1.2308  slip 2.843e-02
+step=979      elapsedStep= 1.10e+00s  elapsedStepSum= 1.08935e+03s
+sphere: step 1000  t 0.05000  F 1.141168e-10 4.820081e-05 -2.783255e-10  Cd 1.2274  slip 2.836e-02
+>>> runtime statistics (step= 1000  totalElapsed= 1373.97s):
+step=1027     elapsedStep= 1.10e+00s  elapsedStepSum= 1.14257e+03s
+sphere: step 1050  t 0.05250  F 1.079507e-10 4.808267e-05 -2.754543e-10  Cd 1.2244  slip 2.831e-02
+step=1076     elapsedStep= 1.10e+00s  elapsedStepSum= 1.19686e+03s
+sphere: step 1100  t 0.05500  F 1.024480e-10 4.797690e-05 -2.727212e-10  Cd 1.2217  slip 2.826e-02
+step=1125     elapsedStep= 1.11e+00s  elapsedStepSum= 1.25119e+03s
+sphere: step 1150  t 0.05750  F 9.757247e-11 4.788206e-05 -2.701868e-10  Cd 1.2193  slip 2.821e-02
+step=1174     elapsedStep= 1.14e+00s  elapsedStepSum= 1.30564e+03s
+sphere: step 1200  t 0.06000  F 9.327399e-11 4.779693e-05 -2.677222e-10  Cd 1.2171  slip 2.817e-02
+step=1223     elapsedStep= 1.10e+00s  elapsedStepSum= 1.35996e+03s
+sphere: step 1250  t 0.06250  F 8.951547e-11 4.772044e-05 -2.655502e-10  Cd 1.2152  slip 2.814e-02
+step=1272     elapsedStep= 1.10e+00s  elapsedStepSum= 1.41430e+03s
+sphere: step 1300  t 0.06500  F 8.623065e-11 4.765168e-05 -2.635400e-10  Cd 1.2134  slip 2.810e-02
+step=1321     elapsedStep= 1.11e+00s  elapsedStepSum= 1.46869e+03s
+sphere: step 1350  t 0.06750  F 8.340683e-11 4.758979e-05 -2.617122e-10  Cd 1.2119  slip 2.808e-02
+step=1370     elapsedStep= 1.11e+00s  elapsedStepSum= 1.52305e+03s
+sphere: step 1400  t 0.07000  F 8.100592e-11 4.753400e-05 -2.599671e-10  Cd 1.2104  slip 2.805e-02
+step=1419     elapsedStep= 1.10e+00s  elapsedStepSum= 1.57740e+03s
+sphere: step 1450  t 0.07250  F 7.895109e-11 4.748353e-05 -2.584842e-10  Cd 1.2092  slip 2.803e-02
+step=1468     elapsedStep= 1.10e+00s  elapsedStepSum= 1.63169e+03s
+sphere: step 1500  t 0.07500  F 7.722294e-11 4.743765e-05 -2.572151e-10  Cd 1.2080  slip 2.801e-02
+>>> runtime statistics (step= 1500  totalElapsed= 1928.35s):
+step=1516     elapsedStep= 1.10e+00s  elapsedStepSum= 1.68471e+03s
+sphere: step 1550  t 0.07750  F 7.578059e-11 4.739578e-05 -2.560548e-10  Cd 1.2069  slip 2.799e-02
+step=1565     elapsedStep= 1.10e+00s  elapsedStepSum= 1.73885e+03s
+sphere: step 1600  t 0.08000  F 7.457820e-11 4.735750e-05 -2.549657e-10  Cd 1.2059  slip 2.797e-02
+step=1614     elapsedStep= 1.13e+00s  elapsedStepSum= 1.79302e+03s
+sphere: step 1650  t 0.08250  F 7.356729e-11 4.732252e-05 -2.540600e-10  Cd 1.2051  slip 2.795e-02
+step=1663     elapsedStep= 1.11e+00s  elapsedStepSum= 1.84717e+03s
+sphere: step 1700  t 0.08500  F 7.274879e-11 4.729060e-05 -2.533248e-10  Cd 1.2042  slip 2.794e-02
+step=1712     elapsedStep= 1.10e+00s  elapsedStepSum= 1.90132e+03s
+sphere: step 1750  t 0.08750  F 7.207862e-11 4.726148e-05 -2.526573e-10  Cd 1.2035  slip 2.792e-02
+step=1761     elapsedStep= 1.10e+00s  elapsedStepSum= 1.95548e+03s
+sphere: step 1800  t 0.09000  F 7.152665e-11 4.723491e-05 -2.520305e-10  Cd 1.2028  slip 2.791e-02
+step=1810     elapsedStep= 1.10e+00s  elapsedStepSum= 2.00961e+03s
+sphere: step 1850  t 0.09250  F 7.106089e-11 4.721067e-05 -2.515294e-10  Cd 1.2022  slip 2.790e-02
+step=1859     elapsedStep= 1.10e+00s  elapsedStepSum= 2.06375e+03s
+sphere: step 1900  t 0.09500  F 7.069399e-11 4.718852e-05 -2.511622e-10  Cd 1.2016  slip 2.789e-02
+step=1908     elapsedStep= 1.10e+00s  elapsedStepSum= 2.11777e+03s
+sphere: step 1950  t 0.09750  F 7.039954e-11 4.716827e-05 -2.508145e-10  Cd 1.2011  slip 2.788e-02
+step=1957     elapsedStep= 1.10e+00s  elapsedStepSum= 2.17178e+03s
+sphere: step 2000  t 0.10000  F 7.011090e-11 4.714975e-05 -2.504167e-10  Cd 1.2007  slip 2.787e-02
+>>> runtime statistics (step= 2000  totalElapsed= 2481.84s):

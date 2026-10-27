@@ -563,16 +563,19 @@ with the wake behind it.
 | case | NekIBM input | reference | this repo | notes |
 |---|---|---|---|---|
 | settling glass sphere, Ga 49.1, rho_p/rho_f 2.56 | `Set1sphere` (nu 0.005416, d 1/6, g 9.81, 1.2 x 1.2 cross-section periodic) | Mordant & Pinton: Re_t = 41, u_t = 1.332 | u = 1.249 at t = 1 (N = 7, FWHM 0.12 d), 1.244 (N = 8, FWHM 0.10 d); Re 38.4, force at 98 % of the net weight | 6 % slow; filter-insensitive (0.4 %); the 7.2 d lateral period hinders settling by up to 14 % in the Stokes limit (Hasimoto, phi^(1/3) = 0.083), less at Re 41; standard-drag ODE gives 1.427 (Re 44), 7 % above the measurement |
-| fixed sphere, Re 100 | `fixsphere/Re100` box (8d x 15d x 8d, inflow/outflow in y, periodic x, z) | Johnson & Patel: C_d = 1.09 | C_d = 1.286 at U t/d = 10 (N = 5, FWHM 0.12 d, 16 x 30 x 16 elements; NekIBM: 32 x 60 x 32, N = 7) | +18 %: diffuse-interface drag, see Re 10 |
+| fixed sphere, Re 100 | `fixsphere/Re100` box (8d x 15d x 8d, inflow/outflow in y, periodic x, z) | Johnson & Patel: C_d = 1.09, standing eddy 0.87 d | C_d = 1.286 at U t/d = 10 (N = 5, FWHM 0.12 d, 16 x 30 x 16 elements, laptop), eddy 1.00 d; C_d = 1.201, eddy 0.95 d on NekIBM's mesh (`hires`: 32 x 60 x 32, N = 7, FWHM 0.04 d, Tuolumne, 8 MI300A) | +18 % → +10 % with the sharper interface (marker slip 3.9 % → 2.8 %); C_d still falling by 0.002 per d/U at U t/d = 10, so part of the rest is the developing wake |
 | fixed sphere, Re 10 | `simple` box (4d)^3 | standard drag 4.15–4.3 | C_d = 4.69 with FWHM 0.08 d (two GLL spacings, marker slip 18 %), 4.09 with FWHM 0.04 d (one spacing, slip 31 %) | the two widths bracket the reference: a wide Gaussian enlarges the body, a one-cell one under-enforces no-slip; converging needs a finer grid, not a narrower filter |
 
 What this shows: with NekIBM's own set-ups the IBM reproduces the reference
-drag and settling velocity to 6–18 %, with the sign and size expected from
-the Gaussian interface width at d/10 resolution (fixed spheres) and from the
-periodic-array hindrance of NekIBM's narrow column (settling). NekIBM's
-published runs use half the marker spacing (`n_dh` = 20) on a mesh 4–30x
-larger, which is what a quantitative match needs; the inputs here are set up
-for that on a cluster. The paper's numbers were not available, so the
+drag and settling velocity to 6–18 % on the laptop grids, with the sign and
+size expected from the Gaussian interface width at d/10 resolution (fixed
+spheres) and from the periodic-array hindrance of NekIBM's narrow column
+(settling). On NekIBM's own Re 100 mesh (section 6, Tuolumne) the drag
+error halves to +10 % and the standing eddy shortens from 1.00 d to 0.95 d
+(reference 0.87 d), i.e. the interface width is the leading error and the
+scheme converges towards the reference as it is refined; the remaining
+offset at U t/d = 10 includes a still-developing wake (Johnson & Patel's
+value is the steady state). The paper's numbers were not available, so the
 comparison is to the experiments and correlations NekIBM itself used.
 
 Practical findings on the way: nekRS's mesh repair (`xyz repair`) diverges
@@ -598,16 +601,23 @@ export NEKRS_HOME=/p/lustre5/<user>/nekrs-install
 cd external/nekRS && CC=cc CXX=CC FC=ftn ./build.sh -DCMAKE_INSTALL_PREFIX=$NEKRS_HOME \
   -DENABLE_HYPRE_GPU=off -DENABLE_ADIOS=off -DOCCA_ENABLE_CUDA=off -DOCCA_ENABLE_DPCPP=off  # ADIOS links the python module's old libzmq
 # cases (ppiclF with the Cray wrappers, one rank per GPU)
-export FC=ftn CC=cc LAUNCHER="flux run --gpus-per-task=1 -n"
+export FC=ftn CC=cc LAUNCHER="flux run -g 1 -n"   # this flux takes -g, not --gpus-per-task
 flux alloc -q pdebug -N 1 -B <bank> -t 60m
 scripts/run_case.sh cases/ibm_fixed_sphere sphere 4 --backend HIP --device-id 0  # flux shows one GPU per task
+# batch (from the repo root; flux copies the script to /var/tmp, so it finds the repo through $PWD)
+flux batch -q pbatch -N 1 -B <bank> -t 3h -n 4 -g 1 --output=build/x.out scripts/tuolumne_batch.sh <case dir> <casename> 4
 ```
 
 Measured on one node (4 MI300A): `ibm_fixed_sphere` 0.27 s/step (11x the
-laptop), `ibm_sphere_re100/hires` 1.9 s/step (the host-staged ppiclF side
-dominates at 21M points); both hires cases therefore go through `pbatch` with
-`scripts/tuolumne_batch.sh` (ppiclF pre-built on a login node for the gslib
-download).
+laptop, C_d bit-identical to the laptop run), `ibm_sphere_re100/hires`
+1.9 s/step on 4 GPUs and 1.1 s/step on 8 (two nodes; the host-staged ppiclF
+side dominates at 21M points). `pbatch` carried a backlog of several
+thousand jobs, so the Re 100 hires run went through `pdebug` on two nodes
+(2000 steps in 41 min, `cases/ibm_sphere_re100/hires/tuolumne_8gpu.log`, the
+`sphere:` history plus every 50th step time); the settling hires case waits
+in `pbatch` via `scripts/tuolumne_batch.sh`. ppiclF is pre-built on a login
+node (gslib download) into `build/<case path with / as _>`; `| head` on a
+running job's output file closes the pipe and kills the job.
 
 NekIBM-resolution inputs for the section 5d comparison are in
 `cases/ibm_sphere_re100/hires` (32 x 60 x 32 elements, N = 7, 21M points,

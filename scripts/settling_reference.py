@@ -51,7 +51,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--settle", required=True)
     ap.add_argument("--settle-fine")
+    ap.add_argument("--settle-hires", help="Tuolumne run of cases/ibm_settling_sphere/hires")
     ap.add_argument("--re100", required=True)
+    ap.add_argument("--re100-hires", help="Tuolumne run of cases/ibm_sphere_re100/hires")
     ap.add_argument("--re10", required=True)
     ap.add_argument("--re10-fine")
     ap.add_argument("--out", default="nekibm_refs.png")
@@ -65,7 +67,8 @@ def main():
     fig, axs = plt.subplots(1, 3, figsize=(16, 4.4))
 
     ax = axs[0]
-    for path, lab, st in ((a.settle, "N = 7, FWHM 0.12 d", "C0-"), (a.settle_fine, "N = 8, FWHM 0.10 d", "C1-")):
+    for path, lab, st in ((a.settle, "N = 7, FWHM 0.12 d", "C0-"), (a.settle_fine, "N = 8, FWHM 0.10 d", "C1-"),
+                          (a.settle_hires, "hires: 60 d column, markers d/20, FWHM 0.10 d", "C2-")):
         if not path:
             continue
         S = parse(path, SETTLE)
@@ -83,9 +86,14 @@ def main():
     ax.grid(alpha=0.3)
 
     ax = axs[1]
-    C = parse(a.re100, CD)
-    print(f"Re 100: Cd {C[-1, 1]:.4f} at U t / d = {C[-1, 0] / 0.01:.1f}, slip {C[-1, 2]:.3f}; Johnson & Patel 1.09, ratio {C[-1, 1] / 1.09:.3f}")
-    ax.plot(C[:, 0] / 0.01, C[:, 1], "C0-", label="this repo's IBM, N = 5, FWHM 0.12 d (NekIBM fixsphere/Re100 box)")
+    for path, lab, st in ((a.re100, "N = 5, FWHM 0.12 d, 16 x 30 x 16 (NekIBM fixsphere/Re100 box)", "C0-"),
+                          (a.re100_hires, "hires: N = 7, FWHM 0.04 d, 32 x 60 x 32 (NekIBM's mesh)", "C2-")):
+        if not path:
+            continue
+        C = parse(path, CD)
+        print(f"Re 100 {lab}: Cd {C[-1, 1]:.4f} at U t / d = {C[-1, 0] / 0.01:.1f}, slip {C[-1, 2]:.3f}; "
+              f"Johnson & Patel 1.09, ratio {C[-1, 1] / 1.09:.3f}")
+        ax.plot(C[:, 0] / 0.01, C[:, 1], st, label=f"this repo's IBM, {lab}")
     ax.axhline(1.09, color="k", ls="--", lw=0.9, label="Johnson & Patel (1999): 1.09")
     ax.set_ylim(0.8, 2.0)
     ax.set_xlabel("U t / d")
