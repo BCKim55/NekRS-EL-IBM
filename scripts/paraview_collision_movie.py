@@ -58,6 +58,10 @@ sl.SliceType.Normal = [0, 0, 1]
 dsl = Show(sl, view)
 dsl.Ambient = 1.0  # flat colours on the slice, no shading
 dsl.Diffuse = 0.0
+# edge of the (white) slice so it reads as a plane
+sle = Outline(Input=sl)
+dsle = Show(sle, view)
+dsle.DiffuseColor = dsle.AmbientColor = [0.6, 0.6, 0.6]
 ColorBy(dsl, ("POINTS", "s1"))
 lut = GetColorTransferFunction("s1")
 # white where there are no particles, blue -> dark red in the cloud
