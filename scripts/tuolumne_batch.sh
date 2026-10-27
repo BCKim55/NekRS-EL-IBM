@@ -6,7 +6,9 @@
 #   FC=ftn CC=cc scripts/build_ppiclf.sh <case dir>/user_routines build/<case dir basename>
 set -euo pipefail
 case_dir=$1; casename=$2; nranks=${3:-4}
-root=$(cd "$(dirname "$0")/.." && pwd)
+# flux batch copies the script elsewhere, so locate the repo by the submission cwd
+root=${REPO_ROOT:-$PWD}
+[ -x "$root/scripts/run_case.sh" ] || { echo "submit from the repo root (or set REPO_ROOT)"; exit 1; }
 
 module reset >/dev/null 2>&1 || true
 module load PrgEnv-gnu gcc-native craype-accel-amd-gfx942 rocm/6.3.1 cmake python/3.12.2
