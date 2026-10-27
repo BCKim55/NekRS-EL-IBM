@@ -67,7 +67,8 @@ export OMPI_CXX=g++-16            # whatever built nekRS
 # LAUNCHER="flux run -g 1 -n" (or "srun -n"); see docs/design.md §6
 scripts/run_case.sh cases/el_ibm_collision collision 4 --backend CPU
 python3 scripts/plot_collision.py cases/el_ibm_collision
-# ParaView: fluid checkpoints (collision.nek5000, enable the arrays in the reader), particles via
+# ParaView: fluid checkpoints (collision.nek5000, enable the arrays in the reader; the projected
+# particle volume fraction phi_p is written as scalar00, Config::phiCheckpointField), particles via
 python3 scripts/snapshots_to_vtk.py cases/el_ibm_collision   # snapshots/el.pvd, body.pvd
 ```
 

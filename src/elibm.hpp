@@ -91,6 +91,9 @@ struct Config {
   bool twoWay = true; // false: particles feel the fluid, the fluid not the particles
   bool qtl = true;
   bool zeroMeanDiv = true; // closed or fully periodic domain
+  // checkpoint slot for the projected particle volume fraction phi_p ("" : not written);
+  // nekRS's field format only knows scalarNN, so pick a slot the case's own scalars do not use
+  std::string phiCheckpointField = "scalar00";
 };
 
 // Totals over all ranks, for diagnostics.
@@ -134,6 +137,11 @@ public:
     o_FU.resize(nrs->fluid->fieldOffsetSum);
     o_div.resize(nrs->fluid->fieldOffset);
     nrs->userSource = [this](double) { applySource(); };
+    if (!cfg.phiCheckpointField.empty()) {
+      o_phi.resize(nrs->fluid->fieldOffset);
+      platform->linAlg->fill(nrs->fluid->fieldOffset, 0.0, o_phi);
+      nrs->addUserCheckpointField(cfg.phiCheckpointField, {o_phi});
+    }
     if (cfg.qtl) {
       nrs->userDivergence = [this](double) { this->nrs->fluid->o_div.copyFrom(o_div, this->nrs->meshV->Nlocal); };
     }
@@ -511,6 +519,7 @@ private:
   std::vector<std::vector<dfloat>> extHist; // IBM part as written, newest first
   deviceMemory<dfloat> o_FU;
   deviceMemory<dfloat> o_div;
+  deviceMemory<dfloat> o_phi; // projected phi_p for the checkpoint files
 
   static MPI_Comm comm() { return platform->comm.mpiComm(); }
 
@@ -614,6 +623,11 @@ private:
 
     std::vector<double> phi;
     ppiclf::projectedField(mesh, PPICLF_P_JPHIP, phi);
+    if (o_phi.size()) {
+      std::vector<dfloat> tmp(offset, 0.0);
+      std::copy(phi.begin(), phi.begin() + N, tmp.begin());
+      o_phi.copyFrom(tmp);
+    }
 
     FUel.assign(fluid->fieldOffsetSum, 0.0);
     FUib.assign(fluid->fieldOffsetSum, 0.0);
