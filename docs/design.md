@@ -433,6 +433,9 @@ nekRS reports as supported on the device.
 
 ## 5. Validation against the original ppiclF and NekIBM
 
+(`validation.md` collects every check in the repo, these included, in a
+uniform set-up / reference / result / interpretation form.)
+
 Three checks that the merged code reproduces the codes it was built from:
 the ppiclF library itself before and after `patches/ppiclF`, the ppiclF
 two-way coupling against ppiclF's own host (Nek5000), and the IBM against

@@ -98,7 +98,7 @@ the shared model in `src/`, or the patches change, and always relinks the UDF.
 
 ![TAB breakup validation](docs/img/tab_breakup.png)
 
-Validation against the original codes (design doc §5): ppiclF before/after the patches, nekRS+ppiclF vs Nek5000+ppiclF, and the IBM sphere drag:
+Every verification and validation check, with set-up, reference, commands, numbers and what each result does and does not show, is collected in [docs/validation.md](docs/validation.md) (V1–V12). Against the original codes (design doc §5): ppiclF before/after the patches, nekRS+ppiclF vs Nek5000+ppiclF, and the IBM sphere drag:
 
 ![validation against the originals](docs/img/validation.png)
 
