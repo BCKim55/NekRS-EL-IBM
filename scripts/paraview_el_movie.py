@@ -7,10 +7,14 @@ EL parcels (true diameter) and the IBM body as sphere glyphs.
     /Applications/ParaView-5.10.1.app/Contents/bin/pvpython scripts/paraview_el_movie.py <case> \\
         [--out <case>/snapshots/movie.mp4] [--fps 12] [--phimax 0.025] [--normal z]
         [--time-unit 1 --time-label t] [--view xy|iso] [--zoom 1]
+        [--color-by attached] [--state <case>/snapshots/state.pvsm]
 
 Defaults reproduce the el_ibm_collision movie (iso view, t in code units).
 cases/pilobolus_launch/sap: --phimax 0.1 --time-unit 1e3 --time-label "t (ms)"
 --view xy --zoom 3 (the flight path fills the frame, the far field is cut).
+cases/el_ibm_adhesion: --color-by attached (free parcels orange, stuck ones
+green). --state writes a ParaView state file with the same pipeline: open it
+in the GUI (File > Load State) to browse the fluid, parcels and body.
 The slice updates whenever a checkpoint exists; the parcels every snapshot.
 """
 import argparse
@@ -30,6 +34,9 @@ ap.add_argument("--time-unit", type=float, default=1.0, help="label = time * uni
 ap.add_argument("--time-label", default="t")
 ap.add_argument("--view", default="iso", choices=["iso", "xy"])
 ap.add_argument("--zoom", type=float, default=1.0, help="> 1 moves the camera closer to the domain centre")
+ap.add_argument("--color-by", default=None, choices=["attached", "contact"],
+                help="colour the parcels by this snapshot scalar instead of a flat colour")
+ap.add_argument("--state", default=None, help="also save a ParaView state file (.pvsm) of the pipeline")
 a = ap.parse_args()
 case = os.path.abspath(a.case)
 snap = os.path.join(case, "snapshots")
@@ -100,8 +107,16 @@ g.ScaleArray = ["POINTS", "diameter"]
 g.ScaleFactor = 1.0
 g.GlyphMode = "All Points"
 dg = Show(g, view)
-dg.ColorArrayName = ["POINTS", ""]
-dg.DiffuseColor = [0.85, 0.25, 0.1]
+if a.color_by:
+    ColorBy(dg, ("POINTS", a.color_by))
+    glut = GetColorTransferFunction(a.color_by)
+    glut.InterpretValuesAsCategories = 1
+    glut.Annotations = ["0", "free", "1", "stuck"]
+    glut.IndexedColors = [0.85, 0.25, 0.1, 0.1, 0.6, 0.2]
+    dg.SetScalarBarVisibility(view, False)
+else:
+    dg.ColorArrayName = ["POINTS", ""]
+    dg.DiffuseColor = [0.85, 0.25, 0.1]
 
 gb = Glyph(Input=body, GlyphType="Sphere")
 gb.GlyphType.ThetaResolution = gb.GlyphType.PhiResolution = 48
@@ -134,6 +149,9 @@ else:  # xy: look down the slice normal, slightly tilted so the glyphs read as s
     view.CameraViewUp = up
 view.CameraFocalPoint = ctr
 view.CameraViewAngle = 30
+if a.state:
+    SaveState(a.state)
+    print("wrote", a.state)
 
 scene = GetAnimationScene()
 scene.UpdateAnimationUsingDataTimeSteps()
