@@ -29,7 +29,7 @@ ap.add_argument("--normal", default="z", choices="xyz")
 ap.add_argument("--time-unit", type=float, default=1.0, help="label = time * unit")
 ap.add_argument("--time-label", default="t")
 ap.add_argument("--view", default="iso", choices=["iso", "xy"])
-ap.add_argument("--zoom", type=float, default=1.0, help="> 1 zooms on the domain centre")
+ap.add_argument("--zoom", type=float, default=1.0, help="> 1 moves the camera closer to the domain centre")
 a = ap.parse_args()
 case = os.path.abspath(a.case)
 snap = os.path.join(case, "snapshots")
@@ -121,18 +121,19 @@ dann.Color = [0, 0, 0]
 dann.FontSize = 18
 dann.WindowLocation = "Upper Left Corner"
 
+Render(view)  # the first render resets the camera; set ours after it
 if a.view == "iso":
-    view.CameraPosition = [ctr[0] + 1.4 * size, ctr[1] + 1.1 * size, ctr[2] + 2.1 * size]
+    view.CameraPosition = [c + f * size / a.zoom for c, f in zip(ctr, (1.4, 1.1, 2.1))]
     view.CameraViewUp = [0, 1, 0]
 else:  # xy: look down the slice normal, slightly tilted so the glyphs read as spheres
     up = [0, 1, 0] if k != 1 else [0, 0, 1]
     pos = list(ctr)
-    pos[k] += 2.2 * size
-    pos[(k + 1) % 3] += 0.15 * size
+    pos[k] += 2.2 * size / a.zoom
+    pos[(k + 1) % 3] += 0.15 * size / a.zoom
     view.CameraPosition = pos
     view.CameraViewUp = up
 view.CameraFocalPoint = ctr
-view.CameraViewAngle = 30 / a.zoom
+view.CameraViewAngle = 30
 
 scene = GetAnimationScene()
 scene.UpdateAnimationUsingDataTimeSteps()
