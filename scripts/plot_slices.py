@@ -29,6 +29,13 @@ def panel(ax, d, xc, yc, r, title, zoom=None, uref=1.0):
 
     x, y, u, v = d["x"], d["y"], d["u"], d["v"]
     tri = mtri.Triangulation(x, y)
+    # the solid: triangles whose centroid lies inside the sphere are masked
+    # out of the contours, the streamline field is undefined there, and the
+    # disc is drawn filled on top (the IBM has fluid inside the shell; it is
+    # rigid, not flow)
+    cx = x[tri.triangles].mean(axis=1) - xc
+    cy = y[tri.triangles].mean(axis=1) - yc
+    tri.set_mask(cx * cx + cy * cy < r * r)
     mag = np.hypot(u, v) / uref
     cf = ax.tricontourf(tri, mag, levels=np.linspace(0, 1.25, 26), cmap="viridis", extend="max")
     # streamlines on a regular grid interpolated from the triangulation
@@ -37,10 +44,13 @@ def panel(ax, d, xc, yc, r, title, zoom=None, uref=1.0):
     else:
         xlo, xhi, ylo, yhi = x.min(), x.max(), y.min(), y.max()
     gx, gy = np.meshgrid(np.linspace(xlo, xhi, 120), np.linspace(ylo, yhi, 160))
-    iu = mtri.LinearTriInterpolator(tri, u)(gx, gy)
-    iv = mtri.LinearTriInterpolator(tri, v)(gx, gy)
-    ax.streamplot(gx, gy, np.ma.filled(iu, 0), np.ma.filled(iv, 0), color="w", linewidth=0.5, density=1.1, arrowsize=0.6)
-    ax.add_patch(Circle((xc, yc), r, fill=False, ec="r", lw=1.2))
+    iu = np.ma.filled(mtri.LinearTriInterpolator(tri, u)(gx, gy), np.nan)
+    iv = np.ma.filled(mtri.LinearTriInterpolator(tri, v)(gx, gy), np.nan)
+    inside = (gx - xc) ** 2 + (gy - yc) ** 2 < r * r
+    iu[inside] = np.nan
+    iv[inside] = np.nan
+    ax.streamplot(gx, gy, np.nan_to_num(iu), np.nan_to_num(iv), color="w", linewidth=0.5, density=1.1, arrowsize=0.6)
+    ax.add_patch(Circle((xc, yc), r, fc="0.35", ec="r", lw=1.2, zorder=5))
     ax.set_xlim(xlo, xhi)
     ax.set_ylim(ylo, yhi)
     ax.set_aspect("equal")
