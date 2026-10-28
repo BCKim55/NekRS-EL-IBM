@@ -48,7 +48,7 @@ def pvd(path, entries):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("case")
-    ap.add_argument("--dp", type=float, default=0.01, help="EL particle diameter (for a Glyph scale array)")
+    ap.add_argument("--dp", type=float, default=0.01, help="EL particle diameter when the csv has no dp column")
     a = ap.parse_args()
     snap = os.path.join(a.case, "snapshots")
     out = os.path.join(snap, "vtk")
@@ -62,7 +62,8 @@ def main():
         t = float(body[step]["t"]) if step in body else step
         name = f"vtk/el_{step:05d}.vtp"
         vtp(os.path.join(snap, name), [(r["x"], r["y"], r["z"]) for r in rows],
-            {"id": [r["id"] for r in rows], "contact": [r["contact"] for r in rows], "diameter": [a.dp] * len(rows)},
+            {"id": [r["id"] for r in rows], "contact": [r["contact"] for r in rows],
+             "diameter": [r.get("dp", a.dp) for r in rows], "attached": [r.get("attached", 0) for r in rows]},
             {"velocity": [(r["u"], r["v"], r["w"]) for r in rows]})
         el_entries.append((t, name))
         if step in body:

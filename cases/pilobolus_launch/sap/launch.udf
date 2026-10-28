@@ -5,7 +5,8 @@
 // (Config::attachOnContact) and then ride on it, adding their mass. The EL
 // projection uses filter_width (a few droplet spacings), the IBM markers
 // filter_width_ibm. Extra report columns: droplets in the domain, stuck
-// count and mass, sap momentum.
+// count and mass, sap momentum. snapshot_interval > 0: EL/body snapshots
+// for ParaView (src/elSnapshot.hpp, scripts/paraview_el_movie.py).
 //
 // Base case: an IBM
 // sphere (equivalent sporangium, d = 0.35 mm) driven along +x through air at
@@ -30,6 +31,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "elSnapshot.hpp"
 #include "elibm.hpp"
 #include "fieldDump.hpp"
 
@@ -40,7 +42,7 @@ static std::vector<double> trajT, trajV, trajX; // measured profile (SI)
 static elibm::Coupling *coupling = nullptr;     // never deleted (MPI resources)
 static double vPrev = 0;
 static double filterWidthIbm, sapVolume, dMain, dSat, satFraction, vJet, vSpread, tInj, nozzleRadius, rhoSap, kn;
-static int attach, substeps;
+static int attach, substeps, snapshotInterval = 0;
 static double carryMain = 0, carrySat = 0, injectedVolume = 0;
 static std::mt19937_64 rng(2026);
 
@@ -113,6 +115,7 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
   get("marker_spacing", markerSpacing);
   get("filter_width", filterWidth);
   get("report_interval", reportInterval);
+  get("snapshot_interval", snapshotInterval);
   get("filter_width_ibm", filterWidthIbm);
   get("sap_volume", sapVolume);
   get("d_main", dMain);
@@ -248,6 +251,9 @@ void UDF_ExecuteStep(double time, int tstep)
              tstep, time, body.x[0], body.v[0], ax, fm[0], fm[1], fm[2], fx, cd, fx / (bodyRho * V), coupling->slipRms(),
              tot.nEl, tot.nAttached, tot.attachedMass, tot.elMomentum[0], body.prescribed ? "" : "  free");
     }
+  }
+  if (snapshotInterval > 0 && (tstep % snapshotInterval == 0 || nrs->lastStep)) {
+    elibm::writeSnapshot(*coupling, time, tstep);
   }
   if (nrs->lastStep) {
     dumpPlane(nrs, "plane_z0.csv", 2, 0.0, 1e-12);

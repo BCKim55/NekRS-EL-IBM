@@ -233,6 +233,7 @@ sphere), `contacts`, `bounced` (particles with u_x < 0).
 scripts/run_case.sh cases/el_ibm_collision collision 4 --backend CPU
 python3 scripts/plot_collision.py cases/el_ibm_collision          # figures
 python3 scripts/snapshots_to_vtk.py cases/el_ibm_collision        # ParaView
+/Applications/ParaView-5.10.1.app/Contents/bin/pvpython scripts/paraview_el_movie.py cases/el_ibm_collision  # movie
 ```
 
 **Result** at t = 1.2:

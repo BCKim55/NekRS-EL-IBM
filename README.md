@@ -43,7 +43,7 @@ centre 0.47 d_p from the surface, touching at 0.5 d_p).*
 | `scripts/plot_collision.py` | figures for the collision demo |
 | `scripts/plot_validation.py` | figure for the validation against the originals |
 | `scripts/plot_slices.py`, `src/fieldDump.hpp` | midplane contours of the IBM reference cases |
-| `scripts/snapshots_to_vtk.py`, `scripts/paraview_collision.py` | particle snapshots → ParaView time series (.pvd), ParaView state for the collision case |
+| `src/elSnapshot.hpp`, `scripts/snapshots_to_vtk.py`, `scripts/paraview_collision.py`, `scripts/paraview_el_movie.py` | EL/body snapshots (csv) → ParaView time series (.pvd); ParaView state for the collision case; movie (outline, φ_p slice, parcels, body) of any EL-IBM case |
 | `scripts/settling_reference.py` | NekIBM's reference cases (settling sphere, Re 100, Re 10 filter width) vs their references |
 | `scripts/ppiclf_regression.py` | pristine vs patched ppiclF on ppiclF's own `stokes_2d` example |
 | `cases/settling_twoway/nek5000_reference` | the settling box on Nek5000 v19 + unpatched ppiclF (reference for section 5 of the design doc) |
