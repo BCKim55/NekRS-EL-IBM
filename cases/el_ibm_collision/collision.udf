@@ -23,6 +23,7 @@
 
 static int nPartGlobal, reportInterval, snapshotInterval, substeps, qtl;
 static double filterWidthIbm = 0;
+static int attach = 0;
 static double bodyRadius, bodyRho, dp, rhop, cloudSpeed, cloudRadius, cloudXmin, cloudXmax;
 static double kn, restitution, filterWidth, markerSpacing;
 
@@ -126,7 +127,7 @@ static void report(double time, int tstep)
   }
   if (platform->comm.mpiRank() == 0) {
     printf("collision: step %d  t %.3f  body x %.5f u %.5f  contacts %d  gap/dp %.3f  bounced %d/%lld  "
-           "Pf %.5e  Pel %.5e  Pb %.5e  dP/P0 %.3e  slip %.3e\n",
+           "Pf %.5e  Pel %.5e  Pb %.5e  dP/P0 %.3e  slip %.3e  attached %lld\n",
            tstep,
            time,
            body.x[0],
@@ -139,7 +140,8 @@ static void report(double time, int tstep)
            tot.elMomentum[0],
            tot.bodyMomentum[0],
            (Ptot - P0) / P0,
-           coupling->slipRms());
+           coupling->slipRms(),
+           tot.nAttached);
   }
 }
 
@@ -160,6 +162,7 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
   get("substeps", substeps);
   get("filter_width", filterWidth);
   get("filter_width_ibm", filterWidthIbm);
+  get("attach", attach);
   get("marker_spacing", markerSpacing);
   get("qtl", qtl);
   get("report_interval", reportInterval);
@@ -180,6 +183,7 @@ void UDF_Setup()
   cfg.neighborWidth = dp;
   cfg.substeps = substeps;
   cfg.qtl = qtl != 0;
+  cfg.attachOnContact = attach != 0;
 
   coupling = std::make_unique<elibm::Coupling>(nrs, cfg);
   const auto lo = coupling->domainLo();

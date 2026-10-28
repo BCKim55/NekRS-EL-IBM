@@ -91,7 +91,8 @@ the shared model in `src/`, or the patches change, and always relinks the UDF.
 | `ibm_sphere_re100`, `ibm_settling_sphere` (+ `_fine`) | NekIBM's own reference cases on this IBM: fixed sphere Re 100 (Johnson & Patel 1.09) and the Mordant & Pinton settling glass sphere (Ga 49, Re_t 41) | C_d 1.29 (+18 %, diffuse interface at d/10) on the laptop grid, 1.20 (+10 %) on NekIBM's mesh (`hires`, Tuolumne, 8 MI300A); u_t 6 % slow (7.2 d periodic column), filter-insensitive; see design doc §5d, §6 |
 | `ibm_sphere_moving` | prescribed-motion sphere through fluid at rest (Pilobolus step 2) | C_d 1.26 ± 0.03 vs 1.29 for the fixed sphere in a stream on the same grid; ±2 % grid-crossing oscillation |
 | `ibm_sphere_re300` | fixed sphere Re 300 on the hires mesh (prepared; Tuolumne) | Johnson & Patel C_d 0.656, St 0.137 |
-| `pilobolus_launch` (+ `hires`) | Pilobolus sporangium driven by the measured v(t) through air; fluid force, dry free-flight deceleration (design doc §7) | in progress |
+| `el_ibm_adhesion` | the collision case with sticking contact (Pilobolus step 5) | 107/200 captured, none inside or bounced, momentum budget −3.2e-3 as without attachment |
+| `pilobolus_launch` (+ `hires`, `sap`) | Pilobolus sporangium driven by the measured v(t) through air; fluid force, dry free-flight deceleration, sap droplets that stick (design doc §7) | runs in progress |
 | `el_ibm_collision` | EL particles fired at a free IBM sphere | no particle enters the sphere, the sphere picks up the cloud's momentum (u 0 → 0.27), total momentum within 0.3 %, IBM slip ≈ 2 % of the body speed |
 
 ![Collision demo summary](docs/img/collision_summary.png)
@@ -124,7 +125,8 @@ NekIBM's own reference cases (Mordant & Pinton settling sphere, Johnson & Patel 
 - [x] Spray step 2–3 (device path): TAB deformation drag and breakup, validated on single droplets
 - [x] Validated against the originals (design doc §5): patched ppiclF exact on ppiclF's `stokes_2d` where the pristine one loses a particle on 2+ ranks; nekRS+ppiclF settling within 1 % of Nek5000+ppiclF; IBM sphere drag within blockage of standard drag (NekIBM itself does not run on macOS/gfortran)
 - [x] Separate EL and IBM filter widths (ppiclF patch 0006, `Config::filterWidthIbm`), prescribed-motion bodies (`Body::prescribed`); Pilobolus launch case prepared (design doc §7)
-- [ ] Pilobolus: Re 300 check and launch runs on Tuolumne, sap droplets with adhesion
+- [x] Sticking contact / attached mass (`Config::attachOnContact`, `el_ibm_adhesion`), sap injection case
+- [ ] Pilobolus: Re 300 check and launch runs (laptop runs in progress, Tuolumne inputs ready)
 - [ ] KH-RT breakup, dense-regime drag, implicit drag for post-breakup droplets, spray-data validation
 - [ ] IBM–IBM contact, particle–wall contact (ppiclF walls are not wired yet)
 - [ ] Device path: contact (cell list), IBM markers, implicit Helmholtz filter

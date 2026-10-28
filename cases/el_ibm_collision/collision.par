@@ -43,6 +43,8 @@ substeps = 10
 filter_width = 0.06
 # IBM spreading width (0: same as filter_width); the EL projection keeps filter_width
 filter_width_ibm = 0
+# 1: EL particles stick to the sphere on contact (el_ibm_adhesion)
+attach = 0
 marker_spacing = 0.025
 qtl = 1
 report_interval = 10

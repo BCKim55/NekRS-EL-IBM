@@ -8,7 +8,7 @@
  * rigid body; the body state lives outside ppiclF. */
 
 #define PPICLF_LRS 6
-#define PPICLF_LRP 21
+#define PPICLF_LRP 25
 #define PPICLF_LRP_INT 3
 #define PPICLF_LRP_PRO 7
 
@@ -54,6 +54,14 @@
 /* Gaussian FWHM this particle projects with (EL: Config::filterWidth, marker:
  * Config::filterWidthIbm); ppiclF patch 0006 reads it in the projection */
 #define PPICLF_R_JFILT 21
+/* EL: body the particle is stuck to (1-based; 0: free) and its offset from
+ * that body's centre in the body frame, set on first contact when
+ * attachment is on (Config::attachOnContact); it then moves rigidly with
+ * the body, exerts no drag and adds its mass to the body */
+#define PPICLF_R_JATT 22
+#define PPICLF_R_JAX 23
+#define PPICLF_R_JAY 24
+#define PPICLF_R_JAZ 25
 
 /* projected fields */
 #define PPICLF_P_JFELX 1

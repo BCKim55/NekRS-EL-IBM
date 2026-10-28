@@ -37,6 +37,7 @@ scripts that make them in `../scripts/`.
 | V12 | settling glass sphere vs Mordant & Pinton | validation | `ibm_settling_sphere`, `_fine`, `hires` | u_t −6 % (laptop); hires running |
 | V13 | separate EL and IBM filter widths (ppiclF patch 0006) | verification | `el_ibm_collision`, `ibm_sphere_re100` | equal widths: previous results reproduced; split: budget −4.5e-3 |
 | V14 | prescribed-motion body vs fixed body in a stream | verification | `ibm_sphere_moving` | C_d 1.257 ± 0.029 vs 1.289 |
+| V15 | sticking contact (attachment) momentum budget | verification | `el_ibm_adhesion` | 107/200 captured, budget −3.2e-3 as without |
 
 Not done, and why, is listed at the end.
 
@@ -609,6 +610,35 @@ grid velocities every step. It averages out and shrinks with resolution.
 The last report (U t/d = 10) drops 5 % because the sphere reaches its own
 start-up disturbance through the 15d periodic column, so the window stops
 at 9.8.
+
+## V15. Sticking contact: EL particles captured by a body (`el_ibm_adhesion`)
+
+**What is tested.** `Config::attachOnContact` (design doc §7.5): a particle
+that touches a body sticks, takes its velocity, hands its momentum to the
+body as an impulse and adds its mass to the body; EL–EL contact forces on
+stuck particles are passed to the body.
+
+**Set-up.** V5 with `attach = 1` (everything else identical).
+
+**Run.**
+```bash
+cases/el_ibm_adhesion/setup.sh && scripts/run_case.sh cases/el_ibm_adhesion collision 4 --backend CPU
+```
+
+**Result** at t = 1.2:
+
+| | elastic contact (V5) | sticking |
+|---|---|---|
+| stuck particles | 0 | 107 of 200 |
+| bounced | 4 | 0 |
+| closest approach gap/d_p | 0.109 | −0.021 (first-contact overlap) |
+| body velocity | 0.271 | 0.276 |
+| (P_f + P_EL + P_b − P_0)/P_0 | −3.2e-3 | −3.2e-3 |
+
+**What it shows.** Capture conserves momentum to the same level as the
+elastic contact; the loss is the explicit coupling lag, not the attachment.
+A first version lost 18 % through the EL–EL contact reactions on stuck
+particles (fixed). Not tested: attachment on a rotating body, detachment.
 
 ---
 

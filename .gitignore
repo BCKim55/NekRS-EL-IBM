@@ -16,3 +16,6 @@ cases/*_fine/*.box
 cases/*_fine/*.usr
 cases/*_fine/*.udf
 *.pvsm
+cases/el_ibm_adhesion/collision.{box,re2,udf}
+cases/pilobolus_launch/sap/launch.{box,re2,usr}
+cases/pilobolus_launch/hires/launch.{udf,usr}

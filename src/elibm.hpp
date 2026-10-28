@@ -40,7 +40,7 @@
 
 extern "C" {
 void ppiclc_elibm_SetFluid(double *mu, double *rho, double *grav, double *dt);
-void ppiclc_elibm_SetContact(double *kn, double *restitution, int *ifnb);
+void ppiclc_elibm_SetContact(double *kn, double *restitution, int *ifnb, int *iattach);
 void ppiclc_elibm_SetBodies(int *nb,
                             double *x,
                             double *v,
@@ -93,6 +93,9 @@ struct Config {
   double kn = 0;            // contact stiffness (0: no contact)
   double restitution = 0.9;
   double neighborWidth = 0; // > 0 enables EL-EL contact (>= largest dp)
+  // EL particles stick to the first body they touch (perfectly inelastic),
+  // then ride on it, exert no drag and add their mass to the body
+  bool attachOnContact = false;
   int substeps = 1;
   int ioStep = 0; // ppiclF VTU interval in fluid steps (0: none)
   bool twoWay = true; // false: particles feel the fluid, the fluid not the particles
@@ -118,6 +121,8 @@ struct Totals {
   double elMass = 0;
   long long nEl = 0;
   long long nMarker = 0;
+  long long nAttached = 0;      // EL particles stuck to bodies
+  double attachedMass = 0;      // their mass
 };
 
 class Coupling
@@ -145,8 +150,9 @@ public:
     o_div.resize(nrs->fluid->fieldOffset);
     nrs->userSource = [this](double) { applySource(); };
     if (!cfg.phiCheckpointField.empty()) {
-      o_phi.resize(nrs->fluid->fieldOffset);
-      platform->linAlg->fill(nrs->fluid->fieldOffset, 0.0, o_phi);
+      // sized Nlocal, not fieldOffset: the checkpoint writer rejects padded fields
+      o_phi.resize(mesh->Nlocal);
+      platform->linAlg->fill(mesh->Nlocal, 0.0, o_phi);
       nrs->addUserCheckpointField(cfg.phiCheckpointField, {o_phi});
     }
     if (cfg.qtl) {
@@ -160,6 +166,8 @@ public:
   double slipRms() const { return slipRmsLast; }
   // hydrodynamic force on each body (sum of the marker reactions) from the last step
   const std::vector<vec3> &hydroForceOnBodies() const { return hydroOnBody; }
+  // mass of the EL particles stuck to each body (attachOnContact)
+  const std::vector<double> &attachedMass() const { return attachedMassOnBody; }
 
   // Particles given on any rank are created on that rank; ppiclF bins them.
   void addEl(const ElParticle &p) { elList.push_back(p); }
@@ -286,11 +294,13 @@ public:
     ppiclc_elibm_SetFluid(&mu, &rhof, g.data(), &dt);
     double kn = cfg.kn, e = cfg.restitution;
     int ifnb = cfg.neighborWidth > 0 ? 1 : 0;
-    ppiclc_elibm_SetContact(&kn, &e, &ifnb);
+    int iattach = cfg.attachOnContact ? 1 : 0;
+    ppiclc_elibm_SetContact(&kn, &e, &ifnb, &iattach);
     pushBodies();
     ppiclc_elibm_PlaceMarkers();
 
     contactOnBody.assign(bodyList.size(), vec3{});
+    attachedMassOnBody.assign(bodyList.size(), 0.0);
     updateSources(nullptr);
   }
 
@@ -366,12 +376,17 @@ public:
     // contact impulse each EL particle received from the bodies over the
     // step (RK-weighted in Fortran); the reaction goes to the nearest body
     std::vector<vec3> impulse(bodyList.size(), vec3{});
+    std::vector<double> mAtt(bodyList.size(), 0.0); // mass stuck to each body
     if (bodyList.size()) {
       ppiclf::particles(yLoc, rLoc);
       for (int i = 0; i < ppiclf::numParticles(); i++) {
         const double *r = &rLoc[i * PPICLF_LRP];
         if (std::lround(r[PPICLF_R_JTYPE - 1]) != PPICLF_TYPE_EL) {
           continue;
+        }
+        const int att = std::lround(r[PPICLF_R_JATT - 1]);
+        if (att > 0) {
+          mAtt[att - 1] += r[PPICLF_R_JRHOP - 1] * r[PPICLF_R_JVOLP - 1];
         }
         const vec3 imp = {r[PPICLF_R_JIX - 1], r[PPICLF_R_JIY - 1], r[PPICLF_R_JIZ - 1]};
         if (imp[0] == 0 && imp[1] == 0 && imp[2] == 0) {
@@ -396,7 +411,7 @@ public:
     // 2. bodies
     if (bodyList.size()) {
       const size_t nb = bodyList.size();
-      std::vector<double> buf(9 * nb, 0.0); // force, torque, contact impulse
+      std::vector<double> buf(10 * nb, 0.0); // force, torque, contact impulse, attached mass
       double slip2 = 0, nslip = 0;
       ppiclf::particles(yLoc, rLoc);
       for (int i = 0; i < ppiclf::numParticles(); i++) {
@@ -410,8 +425,8 @@ public:
             minImage(sub(vec3{yLoc[i * PPICLF_LRS], yLoc[i * PPICLF_LRS + 1], yLoc[i * PPICLF_LRS + 2]}, bodyList[b].x));
         const vec3 t = cross(arm, f);
         for (int k = 0; k < 3; k++) {
-          buf[9 * b + k] += f[k];
-          buf[9 * b + 3 + k] += t[k];
+          buf[10 * b + k] += f[k];
+          buf[10 * b + 3 + k] += t[k];
         }
         const double s = norm(f) * dt / (cfg.rhof * r[PPICLF_R_JVOLP - 1]);
         slip2 += s * s;
@@ -419,8 +434,9 @@ public:
       }
       for (size_t b = 0; b < nb; b++) {
         for (int k = 0; k < 3; k++) {
-          buf[9 * b + 6 + k] = impulse[b][k];
+          buf[10 * b + 6 + k] = impulse[b][k];
         }
+        buf[10 * b + 9] = mAtt[b];
       }
       MPI_Allreduce(MPI_IN_PLACE, buf.data(), buf.size(), MPI_DOUBLE, MPI_SUM, comm());
       double s2[2] = {slip2, nslip};
@@ -431,7 +447,7 @@ public:
       for (size_t b = 0; b < nb; b++) {
         auto &body = bodyList[b];
         for (int k = 0; k < 3; k++) {
-          hydroOnBody[b][k] = buf[9 * b + k];
+          hydroOnBody[b][k] = buf[10 * b + k];
         }
         if (body.fixed) {
           continue;
@@ -446,12 +462,14 @@ public:
           continue;
         }
         const double mEff = (body.rho - cfg.rhof) * body.volume();
+        const double mTot = mEff + buf[10 * b + 9]; // plus the stuck particles
         const double iEff = 0.4 * mEff * body.radius * body.radius;
+        attachedMassOnBody[b] = buf[10 * b + 9];
         for (int k = 0; k < 3; k++) {
-          contactOnBody[b][k] = buf[9 * b + 6 + k] / dt;
-          body.v[k] += dt * ((buf[9 * b + k] + contactOnBody[b][k]) / mEff + cfg.grav[k]);
+          contactOnBody[b][k] = buf[10 * b + 6 + k] / dt;
+          body.v[k] += dt * ((buf[10 * b + k] + contactOnBody[b][k] + mTot * cfg.grav[k]) / mTot);
           body.x[k] += dt * body.v[k];
-          body.w[k] += dt * buf[9 * b + 3 + k] / iEff;
+          body.w[k] += dt * buf[10 * b + 3 + k] / iEff;
           if (cfg.periodic[k]) {
             const double len = hi[k] - lo[k];
             body.x[k] = lo[k] + std::fmod(std::fmod(body.x[k] - lo[k], len) + len, len);
@@ -488,6 +506,10 @@ public:
       const double *y = &yLoc[i * PPICLF_LRS];
       if (std::lround(r[PPICLF_R_JTYPE - 1]) == PPICLF_TYPE_EL) {
         const double m = r[PPICLF_R_JRHOP - 1] * r[PPICLF_R_JVOLP - 1];
+        if (std::lround(r[PPICLF_R_JATT - 1]) > 0) {
+          buf[12] += 1;
+          buf[13] += m;
+        }
         for (int k = 0; k < 3; k++) {
           buf[k] += m * y[PPICLF_JVX - 1 + k];
           buf[3 + k] += r[PPICLF_R_JFX - 1 + k];
@@ -531,6 +553,8 @@ public:
     tot.elMass = buf[9];
     tot.nEl = std::llround(buf[10]);
     tot.nMarker = std::llround(buf[11]);
+    tot.nAttached = std::llround(buf[12]);
+    tot.attachedMass = buf[13];
     return tot;
   }
 
@@ -542,6 +566,7 @@ private:
   long long nElGlobal = 0;
   std::vector<Body> bodyList;
   std::vector<vec3> contactOnBody, hydroOnBody;
+  std::vector<double> attachedMassOnBody;
   std::vector<double> massLocal;
   std::vector<double> phifLast;
   std::vector<double> yLoc, rLoc;
@@ -657,9 +682,7 @@ private:
     std::vector<double> phi;
     ppiclf::projectedField(mesh, PPICLF_P_JPHIP, phi);
     if (o_phi.size()) {
-      std::vector<dfloat> tmp(offset, 0.0);
-      std::copy(phi.begin(), phi.begin() + N, tmp.begin());
-      o_phi.copyFrom(tmp);
+      o_phi.copyFrom(std::vector<dfloat>(phi.begin(), phi.begin() + N));
     }
 
     FUel.assign(fluid->fieldOffsetSum, 0.0);

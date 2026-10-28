@@ -3,6 +3,13 @@ c-----------------------------------------------------------------------
       include 'SIZE'
       include 'TOTAL'
 
+      ! the box is generated in mm (parRSB's element check fails on
+      ! sub-mm elements); the case runs in SI, so scale to metres here
+      ntot = lx1*ly1*lz1*nelt
+      call cmult(xm1,1.0d-3,ntot)
+      call cmult(ym1,1.0d-3,ntot)
+      call cmult(zm1,1.0d-3,ntot)
+
       do iel=1,nelt
       do ifc=1,2*ndim
          if (cbc(ifc,iel,1) .eq. 'v  ') boundaryID(ifc,iel) = 1

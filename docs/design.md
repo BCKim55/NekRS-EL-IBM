@@ -730,3 +730,41 @@ edge GLL spacing: 1 µs (hires 0.3 µs). The laptop grid needs 8 ranks on
 macOS (nek interface < 2 GB per rank). Added mass is irrelevant at
 ρ_b/ρ_f ≈ 960; the wake history effect is what the simulation resolves.
 
+### 7.5 Sap droplets and adhesion (`cases/pilobolus_launch/sap`)
+
+The sap leaves the nozzle as a jet that breaks into 100–150 µm drops with
+15–20 µm satellites (We ≈ 0.1 in air: no aerodynamic breakup, so TAB and
+KH-RT stay off; τ_p ≈ 40 ms ≫ dt, so the explicit drag is fine). The case
+injects that population directly: for t < t_inj rank 0 emits, every step,
+the main drops and satellites whose volume adds up to sap_volume · dt/t_inj
+(fractional counts carried over), uniformly over the nozzle disc at the
+origin, at v_jet along x with a Gaussian lateral spread; `Coupling::inject`
+bins them. EL projection width filter_width (2.5e-4, a few drop spacings),
+IBM width filter_width_ibm (5e-5) — the split of 7.1.
+
+Adhesion (`Config::attachOnContact`): a droplet sticks to the first body it
+touches. In ppiclF's RHS the first stage that finds a contact force calls
+`elibm_Attach`: the parcel stores the body index and its offset in the body
+frame (`PPICLF_R_JATT`, `JAX..JAZ`), takes the body's velocity at once, and
+the momentum it loses, m_p (u_b − v_p), goes to the body through the same
+impulse channel as the contact impulse (`JIX..JIZ`). From then on the
+parcel's RHS is the rigid velocity at its attachment point (no drag, no
+contact; it is inside the no-slip shell), `PlaceMarkers` snaps it to the
+rigid position after each step like a marker, its volume still projects to
+φ_p, and its mass is added to the body's inertia and weight in the body
+update (`attachedMass()`), so a free body decelerates as the loaded
+sporangium would. A tether (ligament tension between tail drops and the
+body) is the next model if the stuck mass alone does not explain the
+measured deceleration; it is not implemented.
+
+Check (`cases/el_ibm_adhesion`): the collision demo with `attach = 1`.
+107 of the 200 particles stick (the rest miss the sphere), none bounces or
+enters it (closest approach −0.02 d_p, the overlap at which contact is
+first detected), the sphere ends at u = 0.276 against 0.271 with elastic
+contact (the stuck mass, 2.6x the sphere's excess mass, rides along), and
+the total momentum closes to −3.2e-3 of P_0, the same as without
+attachment. A first version lost 18 %: free particles pushing stuck ones
+(EL–EL contact) got their force but the stuck ones, moving rigidly, passed
+no reaction to the body; the stuck particle now feeds that reaction into
+the body's impulse channel and uses its rigid velocity in the dashpot.
+With `attach = 0` the collision case is unchanged to all digits.

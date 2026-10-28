@@ -32,10 +32,11 @@
       return
       end
 !-----------------------------------------------------------------------
-      subroutine ppiclc_elibm_SetContact(rkn,erest,ifnb)
+      subroutine ppiclc_elibm_SetContact(rkn,erest,ifnb,iattach)
      > bind(C, name="ppiclc_elibm_SetContact")
 !
-! ifnb = 1 enables EL-EL contact (needs ppiclc_solve_InitNeighborBin)
+! ifnb = 1 enables EL-EL contact (needs ppiclc_solve_InitNeighborBin);
+! iattach = 1 makes an EL particle stick to the first IBM body it touches
 !
       implicit none
 !
@@ -43,11 +44,12 @@
       include "ELIBM.inc"
 !
       real*8 rkn, erest
-      integer*4 ifnb
+      integer*4 ifnb, iattach
 !
-      elibm_kn    = rkn
-      elibm_erest = erest
-      elibm_ifnb  = ifnb
+      elibm_kn      = rkn
+      elibm_erest   = erest
+      elibm_ifnb    = ifnb
+      elibm_iattach = iattach
 
       return
       end
@@ -145,17 +147,24 @@
       include "PPICLF"
       include "ELIBM.inc"
 !
-      integer*4 i, b, k
+      integer*4 i, b, k, jr
       real*8 r(3), rlen
 !
       do i=1,ppiclf_npart
-         if (nint(ppiclf_rprop(PPICLF_R_JTYPE,i)) .ne.
-     >       PPICLF_TYPE_MARKER) cycle
-         b = nint(ppiclf_rprop(PPICLF_R_JID,i)) + 1
+         if (nint(ppiclf_rprop(PPICLF_R_JTYPE,i)) .eq.
+     >       PPICLF_TYPE_MARKER) then
+            b  = nint(ppiclf_rprop(PPICLF_R_JID,i)) + 1
+            jr = PPICLF_R_JRX
+         else
+            ! EL particle stuck to a body: rides at its attachment point
+            b  = nint(ppiclf_rprop(PPICLF_R_JATT,i))
+            jr = PPICLF_R_JAX
+            if (b .eq. 0) cycle
+         endif
          do k=1,3
-            r(k) = elibm_brot(k,1,b)*ppiclf_rprop(PPICLF_R_JRX,i)
-     >           + elibm_brot(k,2,b)*ppiclf_rprop(PPICLF_R_JRY,i)
-     >           + elibm_brot(k,3,b)*ppiclf_rprop(PPICLF_R_JRZ,i)
+            r(k) = elibm_brot(k,1,b)*ppiclf_rprop(jr  ,i)
+     >           + elibm_brot(k,2,b)*ppiclf_rprop(jr+1,i)
+     >           + elibm_brot(k,3,b)*ppiclf_rprop(jr+2,i)
             ppiclf_y(PPICLF_JX-1+k,i) = elibm_bx(k,b) + r(k)
             if (ppiclf_iperiodic(k) .eq. 0) then
                rlen = ppiclf_xdrange(2,k) - ppiclf_xdrange(1,k)
@@ -272,6 +281,30 @@
          rmass = rpi/6.0d0*dp**3*ppiclf_rprop(PPICLF_R_JRHOP,i)
          rnp   = ppiclf_rprop(PPICLF_R_JVOLP,i)/(rpi/6.0d0*dp**3)
 
+         ! stuck to a body: rigid motion, no drag, no body contact; a
+         ! free particle pushing it (EL-EL contact) pushes the body, so
+         ! that reaction goes to the body through the impulse channel
+         b = nint(ppiclf_rprop(PPICLF_R_JATT,i))
+         if (b .gt. 0) then
+            call elibm_RigidVel(ppiclf_rprop(1,i),ud)
+            do k=1,3
+               ppiclf_y(PPICLF_JVX-1+k,i) = ud(k)
+               ppiclf_ydot(PPICLF_JX -1+k,i) = ud(k)
+               ppiclf_ydot(PPICLF_JVX-1+k,i) = 0.0d0
+               ppiclf_rprop(PPICLF_R_JFX-1+k,i) = 0.0d0
+               ppiclf_rprop(PPICLF_R_JCX-1+k,i) = 0.0d0
+            enddo
+            if (elibm_ifnb .eq. 1) then
+               call ppiclf_solve_NearestNeighbor(i)
+               do k=1,3
+                  ppiclf_rprop(PPICLF_R_JIX-1+k,i) =
+     >               ppiclf_rprop(PPICLF_R_JIX-1+k,i)
+     >               - wimp*ppiclf_ydotc(PPICLF_JVX-1+k,i)
+               enddo
+            endif
+            cycle
+         endif
+
          do k=1,3
             ur(k) = ppiclf_rprop(PPICLF_R_JUX-1+k,i)
      >            - ppiclf_y(PPICLF_JVX-1+k,i)
@@ -300,6 +333,24 @@
      >         ppiclf_y(PPICLF_JVX,i),0.5d0*dp,rmass,
      >         elibm_bx(1,b),elibm_bv(1,b),elibm_brad(b),
      >         elibm_bmass(b),fb)
+            if (elibm_iattach .eq. 1 .and.
+     >          (fb(1).ne.0.0d0 .or. fb(2).ne.0.0d0 .or.
+     >           fb(3).ne.0.0d0)) then
+               ! first touch: stick. The parcel takes the body velocity
+               ! at once; the momentum it loses is an impulse on the body
+               ! (JIX, the same channel as the contact impulse)
+               call elibm_Attach(i,b)
+               do k=1,3
+                  ppiclf_rprop(PPICLF_R_JIX-1+k,i) =
+     >               ppiclf_rprop(PPICLF_R_JIX-1+k,i) + rnp*rmass*
+     >               (elibm_bv(k,b) - ppiclf_y(PPICLF_JVX-1+k,i))
+                  ppiclf_y(PPICLF_JVX-1+k,i) = elibm_bv(k,b)
+                  ppiclf_ydot(PPICLF_JX -1+k,i) = elibm_bv(k,b)
+                  ppiclf_ydot(PPICLF_JVX-1+k,i) = 0.0d0
+                  ppiclf_rprop(PPICLF_R_JFX-1+k,i) = 0.0d0
+               enddo
+               goto 100
+            endif
             do k=1,3
                ppiclf_rprop(PPICLF_R_JCX-1+k,i) =
      >            ppiclf_rprop(PPICLF_R_JCX-1+k,i) + fb(k)
@@ -315,6 +366,65 @@
      >         + elibm_grav(k)
             ! reaction of the drag on the fluid, for the whole parcel
             ppiclf_rprop(PPICLF_R_JFX-1+k,i) = -rnp*fd*ur(k)
+         enddo
+ 100     continue
+      enddo
+
+      return
+      end
+!-----------------------------------------------------------------------
+      subroutine elibm_RigidVel(rprop,ud)
+!
+! Velocity of the body point an attached EL particle rides on.
+!
+      implicit none
+!
+      include "PPICLF"
+      include "ELIBM.inc"
+!
+      real*8 rprop(PPICLF_LRP), ud(3)
+!
+      real*8 r(3)
+      integer*4 b, k
+!
+      b = nint(rprop(PPICLF_R_JATT))
+      do k=1,3
+         r(k) = elibm_brot(k,1,b)*rprop(PPICLF_R_JAX)
+     >        + elibm_brot(k,2,b)*rprop(PPICLF_R_JAY)
+     >        + elibm_brot(k,3,b)*rprop(PPICLF_R_JAZ)
+      enddo
+      ud(1) = elibm_bv(1,b) + elibm_bw(2,b)*r(3) - elibm_bw(3,b)*r(2)
+      ud(2) = elibm_bv(2,b) + elibm_bw(3,b)*r(1) - elibm_bw(1,b)*r(3)
+      ud(3) = elibm_bv(3,b) + elibm_bw(1,b)*r(2) - elibm_bw(2,b)*r(1)
+
+      return
+      end
+!-----------------------------------------------------------------------
+      subroutine elibm_Attach(i,b)
+!
+! Stick EL particle i to body b at its current position (offset stored
+! in the body frame, rot^T (x_p - x_b), shortest periodic image).
+!
+      implicit none
+!
+      include "PPICLF"
+      include "ELIBM.inc"
+!
+      integer*4 i, b
+!
+      real*8 d(3)
+      integer*4 k, j
+!
+      do k=1,3
+         d(k) = ppiclf_y(PPICLF_JX-1+k,i) - elibm_bx(k,b)
+      enddo
+      call elibm_MinImage(d)
+      ppiclf_rprop(PPICLF_R_JATT,i) = b
+      do k=1,3
+         ppiclf_rprop(PPICLF_R_JAX-1+k,i) = 0.0d0
+         do j=1,3
+            ppiclf_rprop(PPICLF_R_JAX-1+k,i) =
+     >         ppiclf_rprop(PPICLF_R_JAX-1+k,i) + elibm_brot(j,k,b)*d(j)
          enddo
       enddo
 
@@ -367,7 +477,7 @@
       real*8 yi(PPICLF_LRS), rpropi(PPICLF_LRP)
       real*8 yj(PPICLF_LRS), rpropj(PPICLF_LRP)
 !
-      real*8 f(3), rmi, rmj
+      real*8 f(3), rmi, rmj, vi(3), vj(3)
       integer*4 k
 !
       if (j .eq. 0) return
@@ -378,9 +488,18 @@
      >     *rpropi(PPICLF_R_JRHOP)
       rmj = 0.5235987755982988d0*rpropj(PPICLF_R_JDP)**3
      >     *rpropj(PPICLF_R_JRHOP)
-      call elibm_ContactForce(yi(PPICLF_JX),yi(PPICLF_JVX),
+      do k=1,3
+         vi(k) = yi(PPICLF_JVX-1+k)
+         vj(k) = yj(PPICLF_JVX-1+k)
+      enddo
+      ! a stuck particle moves with its body (its stored velocity lags)
+      if (nint(rpropi(PPICLF_R_JATT)) .gt. 0)
+     >   call elibm_RigidVel(rpropi,vi)
+      if (nint(rpropj(PPICLF_R_JATT)) .gt. 0)
+     >   call elibm_RigidVel(rpropj,vj)
+      call elibm_ContactForce(yi(PPICLF_JX),vi,
      >   0.5d0*rpropi(PPICLF_R_JDP),rmi,
-     >   yj(PPICLF_JX),yj(PPICLF_JVX),0.5d0*rpropj(PPICLF_R_JDP),rmj,f)
+     >   yj(PPICLF_JX),vj,0.5d0*rpropj(PPICLF_R_JDP),rmj,f)
 
       do k=1,3
          ppiclf_ydotc(PPICLF_JVX-1+k,i) =
