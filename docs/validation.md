@@ -34,7 +34,7 @@ scripts that make them in `../scripts/`.
 | V9 | plane jet from parcels vs Bickley | validation | `jet_bickley` | u_c within 3.5 % |
 | V10 | fixed sphere Re 10 (NekIBM `simple` box), filter-width bracket | validation | `ibm_fixed_sphere`, `_fine` | 4.09 / 4.69 vs 4.15–4.3 |
 | V11 | fixed sphere Re 100 vs Johnson & Patel, two resolutions | validation | `ibm_sphere_re100`, `hires` | C_d +18 % → +10 % |
-| V12 | settling glass sphere vs Mordant & Pinton | validation | `ibm_settling_sphere`, `_fine`, `hires` | u_t −6 % (laptop); hires running |
+| V12 | settling glass sphere vs Mordant & Pinton | validation | `ibm_settling_sphere`, `_fine`, `hires` | u_t −6 % (laptop), −2.5 % (NekIBM's mesh) |
 | V13 | separate EL and IBM filter widths (ppiclF patch 0006) | verification | `el_ibm_collision`, `ibm_sphere_re100` | equal widths: previous results reproduced; split: budget −4.5e-3 |
 | V14 | prescribed-motion body vs fixed body in a stream | verification | `ibm_sphere_moving` | C_d 1.257 ± 0.029 vs 1.289 |
 | V15 | sticking contact (attachment) momentum budget | verification | `el_ibm_adhesion` | 107/200 captured, budget −3.2e-3 as without |
@@ -543,17 +543,18 @@ scripts/run_case.sh cases/ibm_settling_sphere settle 4 --backend CPU | tee build
 |---|---|---|---|---|
 | laptop, N = 7 | 1.249 | 38.4 | 0.937 | 98 % |
 | `_fine`, N = 8, FWHM 0.10 d | 1.244 | 38.3 | 0.933 | |
-| hires, 60d column | pdebug run reached t = 0.79 (4.2 s/step on 8 GPUs); full run queued in pbatch | | | |
+| hires (NekIBM's mesh, 16 MI300A), at t = 1 / 1.2 | 1.273 / 1.299 | 39.2 / 40.0 | 0.956 / 0.975 | |
 | Mordant & Pinton | 1.332 | 41 | 1 | |
 
-**What it shows.** The sphere settles 6 % slower than measured and the
-result is insensitive to the filter width (0.4 %), so the deficit is not the
-interface. The 7.2d lateral period of NekIBM's box is a periodic array of
-spheres (φ^(1/3) = 0.083), which hinders settling by up to 14 % in the
-Stokes limit (Hasimoto) and less at Re 41, i.e. the right size and sign. The
-hires case has the same cross-section, so it tests the marker and grid
-resolution, not the column width; a wider periodic box would be the next
-check.
+**What it shows.** On the laptop grid the sphere settles 6 % slower than
+measured, insensitive to the filter width (0.4 %); on NekIBM's mesh
+(d/20, markers d/20) the deficit is 2.5 % at t = 1.2 with the velocity
+still rising slowly, so most of the laptop deficit was resolution after
+all, and what remains is of the size of the periodic-array hindrance of
+the 7.2d column (φ^(1/3) = 0.083: up to 14 % in the Stokes limit, Hasimoto,
+much less at Re 41). A wider periodic box would separate the two. The run
+was cut by the 60-min pdebug limit at step 1207 of 2000; 32 ranks segfault
+in the set-up (16 used).
 
 ## V13. Separate EL and IBM filter widths (`el_ibm_collision`, `ibm_sphere_re100`)
 
