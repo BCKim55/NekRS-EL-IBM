@@ -74,36 +74,61 @@ def main():
                   f"mean deceleration {-(vf[-1] - vf[fr][0]) / (tf[-1] - tf[fr][0]):.0f} m/s2 (measured {DECEL_MEAS:.0f})")
     if "sap" in runs:
         S, _ = runs["sap"]
+        ts, afs = S[:, 1], S[:, 10]
+        cs = ts > T_RISE + 2e-5
+        mb = RHO_B * V
         print(f"sap: {int(S[-1, 12])} droplets in the domain at the end, {int(S[-1, 13])} stuck "
-              f"(mass {S[-1, 14]:.3e} kg = {S[-1, 14] / (RHO_B * V):.1%} of the sporangium), "
+              f"(mass {S[-1, 14]:.3e} kg = {S[-1, 14] / mb:.1%} of the sporangium), "
               f"force on the sporangium at the end {S[-1, 8]:.3e} N (single phase {P[-1, 8]:.3e} N)")
+        if cs.any() and coast.any():
+            # coasting-phase force on the body with the droplets on it vs dry; the
+            # loaded body's fluid-only deceleration counts the stuck mass as inertia
+            fs, fd = S[cs, 8].mean(), P[coast, 8].mean()
+            print(f"sap, coasting: fluid force {fs:.3e} N vs dry {fd:.3e} N ({fs / fd - 1:+.0%}), "
+                  f"fluid-only deceleration of the loaded body {-afs[cs].mean():.0f} m/s2 "
+                  f"(a_f mb/(mb + m_stuck): {-(afs[cs] * mb / (mb + S[cs, 14])).mean():.0f}), "
+                  f"stuck mass at the end {S[-1, 14] / mb:.1%} of the sporangium")
 
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, axs = plt.subplots(2, 2, figsize=(11, 7.5))
+    nrow = 3 if "sap" in runs else 2
+    fig, axs = plt.subplots(nrow, 2, figsize=(11, 3.75 * nrow))
+    color = {"prescribed": "C0", "free": "C1", "sap": "C2"}
     for name, (R, fr) in runs.items():
-        tt = R[:, 1] * 1e3
-        axs[0, 0].plot(tt, R[:, 3], label=name)
-        axs[0, 1].plot(tt, R[:, 4], label=name)
-        axs[1, 0].plot(tt, R[:, 8] * 1e6, label=f"{name}: F on body")
+        tt, c = R[:, 1] * 1e3, color[name]
+        axs[0, 0].plot(tt, R[:, 3], c, label=name)
+        axs[0, 1].plot(tt, R[:, 4], c, label=name)
+        axs[1, 0].plot(tt, R[:, 8] * 1e6, c, label=f"{name}: F on body")
         if name == "prescribed":
-            axs[1, 0].plot(tt, R[:, 5] * 1e6, "--", lw=0.8, label="prescribed: marker sum F_m")
-        axs[1, 1].plot(tt, R[:, 9], label=name)
+            axs[1, 0].plot(tt, R[:, 5] * 1e6, "--", color=c, lw=0.8, label="prescribed: marker sum F_m")
+        axs[1, 1].plot(tt, R[:, 9], c, label=name)
     axs[0, 1].axhline(-DECEL_MEAS, color="C3", ls=":", label="measured coasting deceleration")
     axs[1, 1].plot(t * 1e3, schiller_naumann(v), "k--", lw=0.8, label="Schiller-Naumann at Re(t)")
     axs[1, 1].set_ylim(0, 5)
-    for ax, yl in zip(axs.flat, ("v (m/s)", "a (m/s$^2$)", "x force (µN)", "$C_d$")):
+    labels = ["v (m/s)", "a (m/s$^2$)", "x force (µN)", "$C_d$"]
+    titles = ["sporangium velocity", "acceleration (prescribed) / measured (free)", "fluid force on the sporangium",
+              "drag coefficient"]
+    if "sap" in runs:
+        S, _ = runs["sap"]
+        ts = S[:, 1] * 1e3
+        axs[2, 0].plot(ts, S[:, 12], label="droplets in the domain")
+        axs[2, 0].plot(ts, S[:, 13], label="stuck to the sporangium")
+        axs[2, 1].plot(ts, S[:, 14] / (RHO_B * V) * 100, label="stuck mass / sporangium mass")
+        ax2 = axs[2, 1].twinx()
+        ax2.plot(ts, S[:, 15] * 1e9, "C3", label="sap x momentum (right)")
+        ax2.set_ylabel("sap x momentum (nN s)")
+        ax2.legend(fontsize=8, loc="lower right")
+        labels += ["count", "stuck mass (%)"]
+        titles += ["sap droplets", "stuck mass and sap momentum"]
+    for ax, yl, ti in zip(axs.flat, labels, titles):
         ax.set_xlabel("t (ms)")
         ax.set_ylabel(yl)
+        ax.set_title(ti)
         ax.grid(alpha=0.3)
-        ax.legend(fontsize=8)
-    axs[0, 0].set_title("sporangium velocity")
-    axs[0, 1].set_title("acceleration (prescribed) / measured (free)")
-    axs[1, 0].set_title("fluid force on the sporangium")
-    axs[1, 1].set_title("drag coefficient")
+        ax.legend(fontsize=8, loc="upper left")
     fig.tight_layout()
     fig.savefig(a.out, dpi=130)
     print("wrote", a.out)

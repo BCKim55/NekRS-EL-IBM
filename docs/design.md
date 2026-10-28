@@ -795,3 +795,24 @@ attachment. A first version lost 18 %: free particles pushing stuck ones
 no reaction to the body; the stuck particle now feeds that reaction into
 the body's impulse channel and uses its rigid velocity in the dashpot.
 With `attach = 0` the collision case is unchanged to all digits.
+
+Laptop result (prescribed v(t), 1200 steps, 8 ranks, 3–23 s/step with the
+EL work): of the 1011 droplets injected in 0.3 ms (30 main drops, ~980
+satellites) 775 are stuck by 0.86 ms and 1005 are still in the box at the
+end; the stuck mass is 23.2 ng = 77 % of the sap and **90 % of the
+sporangium's own mass** (the 30 nL of sap outweighs the 26 ng sporangium),
+reached in a saturating curve: the main drops, which carry the mass, hit
+within 0.4 ms, the satellites trickle in until 0.9 ms. The fluid force on
+the sporangium during coasting is 1.8 µN against 2.9 µN dry (−36 %,
+C_d 0.4–0.6 against 0.79): the sap jet at 12 m/s drags the air behind the
+sporangium along and lowers its relative velocity. With the stuck mass
+counted as inertia the air alone would decelerate the loaded projectile by
+~40 m/s², 3 % of the measured 1300 m/s², less than the dry sphere's 9 %.
+Sticking droplets therefore cannot explain the measured deceleration
+through their mass or their drag; the momentum they bring is forward
+(impacts at v_jet > v_b push the sporangium). What remains is the tension
+of the sap ligament/tail between the launched mass and the sporangiophore
+(the tether of the paragraph above), or a larger effective cross-section of
+the sap disc than the equivalent sphere; both are open. Figure: bottom row
+of `docs/img/pilobolus_launch.png` (droplet counts, stuck mass, sap
+momentum; the sap curves in the upper panels are the loaded sporangium).
