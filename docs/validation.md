@@ -35,6 +35,8 @@ scripts that make them in `../scripts/`.
 | V10 | fixed sphere Re 10 (NekIBM `simple` box), filter-width bracket | validation | `ibm_fixed_sphere`, `_fine` | 4.09 / 4.69 vs 4.15–4.3 |
 | V11 | fixed sphere Re 100 vs Johnson & Patel, two resolutions | validation | `ibm_sphere_re100`, `hires` | C_d +18 % → +10 % |
 | V12 | settling glass sphere vs Mordant & Pinton | validation | `ibm_settling_sphere`, `_fine`, `hires` | u_t −6 % (laptop); hires running |
+| V13 | separate EL and IBM filter widths (ppiclF patch 0006) | verification | `el_ibm_collision`, `ibm_sphere_re100` | equal widths: previous results reproduced; split: budget −4.5e-3 |
+| V14 | prescribed-motion body vs fixed body in a stream | verification | `ibm_sphere_moving` | C_d 1.257 ± 0.029 vs 1.289 |
 
 Not done, and why, is listed at the end.
 
@@ -551,6 +553,62 @@ Stokes limit (Hasimoto) and less at Re 41, i.e. the right size and sign. The
 hires case has the same cross-section, so it tests the marker and grid
 resolution, not the column width; a wider periodic box would be the next
 check.
+
+## V13. Separate EL and IBM filter widths (`el_ibm_collision`, `ibm_sphere_re100`)
+
+**What is tested.** ppiclF patch 0006 (per-particle Gaussian width in the
+projection, `PPICLF_R_JFILT`) and `Config::filterWidthIbm` change nothing
+when both widths are equal, and keep the budgets when they differ.
+
+**Set-up.** V5 with `filter_width_ibm = 0` (equal) and `0.03` (IBM half the
+EL width 0.06); V11's laptop case (markers only).
+
+**Result.**
+
+| run | body u at t = 1.2 | (P_f + P_EL + P_b − P_0)/P_0 | marker slip (end) | note |
+|---|---|---|---|---|
+| equal widths, before patch | 0.27100 | −3.155e-3 | 4.843e-3 | |
+| equal widths, after patch | 0.27100 | −3.155e-3 | 4.844e-3 | all other digits identical |
+| EL 0.06, IBM 0.03 | 0.27176 | −4.542e-3 | 6.670e-3 | slip during impact 1.2e-2 vs 2.0e-2 |
+| `ibm_sphere_re100`, C_d at U t/d = 10 | 1.2860 before and after | | | bit-identical |
+
+**What it shows.** The patch is inert where the widths agree. With the
+narrower IBM shell the momentum budget closes to 0.45 % instead of 0.32 %
+(same explicit-lag mechanism at the contact), the body threshold
+ρ_b/ρ_f drops from 2.28 to 1.64, and the slip halves. See `design.md` §7.1.
+
+## V14. Prescribed-motion body against the fixed body in a stream (`ibm_sphere_moving`)
+
+**What is tested.** `Body::prescribed` (design doc §7.2): the markers
+enforce a given x(t), v(t) and the reported fluid force is the same as for
+the equivalent fixed body in a stream.
+
+**Set-up.** The `ibm_sphere_re100` box (16 × 30 × 16, N = 5) made fully
+periodic, fluid at rest, sphere driven at −u_in in y from y = +5d, 500 steps
+to U t/d = 10, same markers and FWHM as the fixed case, 4 ranks.
+
+**Reference.** `ibm_sphere_re100` on the same grid (Galilean transform; the
+only differences are the inflow/outflow boundaries and the start-up).
+
+**Run.**
+```bash
+scripts/run_case.sh cases/ibm_sphere_moving moving 4 --backend CPU | tee build/moving_re100.log
+```
+
+**Result** over U t/d = 8–10 (11 reports):
+
+| | C_d mean | C_d std | marker slip |
+|---|---|---|---|
+| moving sphere, fluid at rest | 1.257 | 0.029 | 3.7–4.0 % |
+| fixed sphere in a stream | 1.289 | 0.001 | 3.9 % |
+
+**What it shows.** The prescribed body gives the same drag within 2.4 %,
+with a ±2 % step-to-step oscillation the fixed case lacks: the markers of a
+moving body cross GLL cells and the explicit direct forcing samples new
+grid velocities every step. It averages out and shrinks with resolution.
+The last report (U t/d = 10) drops 5 % because the sphere reaches its own
+start-up disturbance through the 15d periodic column, so the window stops
+at 9.8.
 
 ---
 
