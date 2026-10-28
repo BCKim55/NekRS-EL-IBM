@@ -730,6 +730,22 @@ edge GLL spacing: 1 µs (hires 0.3 µs). The laptop grid needs 8 ranks on
 macOS (nek interface < 2 GB per rank). Added mass is irrelevant at
 ρ_b/ρ_f ≈ 960; the wake history effect is what the simulation resolves.
 
+Laptop result (prescribed, 1200 steps, 8 ranks, 3.4–6.8 s/step): during
+the coasting phase the fluid force on the sporangium is 2.4–3.3 µN,
+C_d = 0.785 against Schiller–Naumann 0.832 at Re 185 (6 % low with a marker
+slip of 20 % of the body speed on this d/9 grid), and the deceleration that
+force alone gives the sporangium is 111 m/s² (93–141). The measured
+1300 m/s² is 12x that: **the air accounts for 9 % of the observed
+deceleration, the sap must supply the remaining 1190 m/s²**. During the
+acceleration phase the marker sum reaches −5.3 µN, of which 2.1 µN is the
+inertia of the fluid inside the shell (ρ_f V a at 6e4 m/s²); the force on
+the body proper peaks at −4.2 µN. The force carries a sawtooth of ±0.2 µN
+with a period of 27 µs = the time to cross one 0.2 mm element at 7.5 m/s:
+the grid-crossing noise of 7.2 on a coarse grid (figure
+`scripts/pilobolus_launch.py` → `docs/img/pilobolus_launch.png`).
+
+![Pilobolus launch](img/pilobolus_launch.png)
+
 ### 7.5 Sap droplets and adhesion (`cases/pilobolus_launch/sap`)
 
 The sap leaves the nozzle as a jet that breaks into 100–150 µm drops with
