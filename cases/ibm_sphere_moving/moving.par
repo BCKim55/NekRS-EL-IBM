@@ -1,0 +1,35 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+numSteps = 500
+dt = 2e-4
+timeStepper = tombo2
+checkpointInterval = 0
+
+[MESH]
+# the ibm_sphere_re100 box (16 x 30 x 16 on 8d x 15d x 8d) made fully
+# periodic: the sphere moves through fluid at rest instead of sitting in a
+# stream; 4 ranks (see ibm_sphere_re100)
+file = "moving.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-7
+
+[FLUID VELOCITY]
+residualTol = 1e-9
+rho = 1.0
+viscosity = 1e-4
+
+[CASEDATA]
+# prescribed-motion check (design doc, Pilobolus step 2): the sphere is
+# driven at u_body = -u_in in y from y0, so in the body frame it is
+# ibm_sphere_re100 (fixed sphere, inflow u_in); the drag coefficient
+# reported in the body frame must match that case (1.286 at U t/d = 10)
+u_in = 1.0
+diameter = 0.01
+y_start = 0.05
+marker_spacing = 6e-4
+filter_width = 1.2e-3
+report_interval = 10

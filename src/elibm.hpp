@@ -50,6 +50,7 @@ void ppiclc_elibm_SetBodies(int *nb,
                             double *mass);
 void ppiclc_elibm_PlaceMarkers();
 void ppiclc_elibm_BeginStep();
+void ppiclc_solve_InitParticleFilter(int *jfilt); // ppiclF patch 0006
 }
 
 namespace elibm
@@ -61,6 +62,11 @@ struct Body {
   double radius = 0;
   double rho = 0;
   bool fixed = false; // held in place: markers still force the fluid, the body does not move
+  // driven: the UDF sets x, v (and w) for the new time before step(); the
+  // markers enforce that motion and hydroForceOnBodies() still reports the
+  // fluid force (sum of the marker reactions; for an accelerating body the
+  // force on the body proper is that plus rho_f V dU/dt, the internal fluid)
+  bool prescribed = false;
   vec3 x{};
   vec3 v{};
   vec3 w{};
@@ -81,7 +87,8 @@ struct Config {
   double rhof = 0; // fluid density
   vec3 grav{};
   std::array<bool, 3> periodic{};
-  double filterWidth = 0;   // Gaussian FWHM for projection and spreading
+  double filterWidth = 0;   // Gaussian FWHM of the EL projection (force, phi_p)
+  double filterWidthIbm = 0; // Gaussian FWHM of the IBM marker spreading (0: filterWidth)
   double markerSpacing = 0; // ~ grid spacing; sets the marker count
   double kn = 0;            // contact stiffness (0: no contact)
   double restitution = 0.9;
@@ -165,17 +172,18 @@ public:
     // Gaussian thickness) must be lighter than the body's excess mass, or a
     // body velocity change is fed back amplified every step. For a sphere,
     // rho_b / rho_f > 1 + 3 sqrt(2 pi) sigma / R.
-    const double sigma = cfg.filterWidth / (2 * std::sqrt(2 * std::log(2.0)));
+    const double ibmWidth = cfg.filterWidthIbm > 0 ? cfg.filterWidthIbm : cfg.filterWidth;
+    const double sigma = ibmWidth / (2 * std::sqrt(2 * std::log(2.0)));
     for (const auto &b : bodyList) {
       const double minRatio = 1 + 3 * std::sqrt(2 * M_PI) * sigma / b.radius;
-      nekrsCheck(!b.fixed && b.rho <= minRatio * cfg.rhof,
+      nekrsCheck(!b.fixed && !b.prescribed && b.rho <= minRatio * cfg.rhof,
                  comm(),
                  EXIT_FAILURE,
                  "IBM body density ratio %g must exceed %g for radius %g and filter width %g\n",
                  b.rho / cfg.rhof,
                  minRatio,
                  b.radius,
-                 cfg.filterWidth);
+                 ibmWidth);
     }
 
     ppiclf::initMPI(comm());
@@ -199,6 +207,7 @@ public:
       r[PPICLF_R_JDP - 1] = p.dp;
       r[PPICLF_R_JVOLP - 1] = p.weight * M_PI / 6.0 * p.dp * p.dp * p.dp;
       r[PPICLF_R_JID - 1] = elOffset + i;
+      r[PPICLF_R_JFILT - 1] = cfg.filterWidth;
       push(p.x, p.v, r);
     }
     elList.clear();
@@ -234,6 +243,7 @@ public:
           r[PPICLF_R_JRX - 1] = ref[0];
           r[PPICLF_R_JRY - 1] = ref[1];
           r[PPICLF_R_JRZ - 1] = ref[2];
+          r[PPICLF_R_JFILT - 1] = ibmWidth;
           push(add(body.x, ref), body.v, r); // placed exactly below
         }
       }
@@ -249,8 +259,13 @@ public:
 
     double alpha = 1e-4; // Gaussian truncated where it falls to alpha of its peak
     int iwallm = 0;
-    double filt = cfg.filterWidth;
+    // ppiclF has one filter; its width sets the ghost and truncation distances,
+    // so it is the larger of the two, and each particle projects with its own
+    // (PPICLF_R_JFILT, patch 0006)
+    double filt = std::max(cfg.filterWidth, ibmWidth);
     ppiclc_solve_InitGaussianFilter(&filt, &alpha, &iwallm);
+    int jfilt = PPICLF_R_JFILT;
+    ppiclc_solve_InitParticleFilter(&jfilt);
     if (cfg.neighborWidth > 0) {
       double width = cfg.neighborWidth;
       ppiclc_solve_InitNeighborBin(&width);
@@ -297,6 +312,7 @@ public:
       r[PPICLF_R_JDP - 1] = p.dp;
       r[PPICLF_R_JVOLP - 1] = p.weight * M_PI / 6.0 * p.dp * p.dp * p.dp;
       r[PPICLF_R_JID - 1] = nElGlobal + offset + i;
+      r[PPICLF_R_JFILT - 1] = cfg.filterWidth;
       y.insert(y.end(), {p.x[0], p.x[1], p.x[2], p.v[0], p.v[1], p.v[2]});
       rprop.insert(rprop.end(), r.begin(), r.end());
     }
@@ -322,6 +338,14 @@ public:
     vec3 g = cfg.grav;
     double dtf = dt;
     ppiclc_elibm_SetFluid(&mu, &rhof, g.data(), &dtf);
+
+    // prescribed bodies: the UDF has set their state for this step
+    for (const auto &b : bodyList) {
+      if (b.prescribed) {
+        pushBodies();
+        break;
+      }
+    }
 
     // 1. particles
     ppiclc_elibm_BeginStep();
@@ -410,6 +434,15 @@ public:
           hydroOnBody[b][k] = buf[9 * b + k];
         }
         if (body.fixed) {
+          continue;
+        }
+        if (body.prescribed) {
+          for (int k = 0; k < 3; k++) {
+            if (cfg.periodic[k]) {
+              const double len = hi[k] - lo[k];
+              body.x[k] = lo[k] + std::fmod(std::fmod(body.x[k] - lo[k], len) + len, len);
+            }
+          }
           continue;
         }
         const double mEff = (body.rho - cfg.rhof) * body.volume();

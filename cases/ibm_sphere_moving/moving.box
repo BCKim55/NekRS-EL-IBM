@@ -1,0 +1,14 @@
+base.rea
+-3                     spatial dimension  ( < 0 --> generate .rea/.re2 pair)
+1                      number of fields
+#=======================================================================
+# NekIBM IBM_test/fixsphere/Re100: box [-0.04,0.04] x [-0.075,0.075] x
+# [-0.04,0.04] (8d x 15d x 8d), inflow uy = 1 at y = -0.075, outflow at
+# y = +0.075, periodic x and z; sphere d = 0.01 at the origin
+#=======================================================================
+Box
+-16  -30  -16                                        nelx,nely,nelz
+-0.04 0.04 1.                                        x0,x1,ratio
+-0.075 0.075 1.                                      y0,y1,ratio
+-0.04 0.04 1.                                        z0,z1,ratio
+P  ,P  ,P  ,P  ,P  ,P                                bc's  (3 chars each!)

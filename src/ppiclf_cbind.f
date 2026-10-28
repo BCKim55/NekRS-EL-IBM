@@ -104,6 +104,14 @@
       return
       end
 !-----------------------------------------------------------------------
+      subroutine ppiclc_solve_InitParticleFilter(jfilt)
+     > bind(C, name="ppiclc_solve_InitParticleFilter")
+      implicit none
+      integer*4 jfilt
+      call ppiclf_solve_InitParticleFilter(jfilt)
+      return
+      end
+!-----------------------------------------------------------------------
       subroutine ppiclc_solve_InitBoxFilter(filt,iwallm)
      > bind(C, name="ppiclc_solve_InitBoxFilter")
       implicit none

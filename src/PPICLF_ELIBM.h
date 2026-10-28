@@ -8,7 +8,7 @@
  * rigid body; the body state lives outside ppiclF. */
 
 #define PPICLF_LRS 6
-#define PPICLF_LRP 20
+#define PPICLF_LRP 21
 #define PPICLF_LRP_INT 3
 #define PPICLF_LRP_PRO 7
 
@@ -51,6 +51,9 @@
 #define PPICLF_R_JIX 18
 #define PPICLF_R_JIY 19
 #define PPICLF_R_JIZ 20
+/* Gaussian FWHM this particle projects with (EL: Config::filterWidth, marker:
+ * Config::filterWidthIbm); ppiclF patch 0006 reads it in the projection */
+#define PPICLF_R_JFILT 21
 
 /* projected fields */
 #define PPICLF_P_JFELX 1

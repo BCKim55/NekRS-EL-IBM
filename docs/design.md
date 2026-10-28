@@ -628,3 +628,105 @@ markers d/50, FWHM 0.04 d) and `cases/ibm_settling_sphere/hires`
 (21 x 180 x 21 elements on the 60 d column, N = 7, 28M points, markers d/20
 as NekIBM's `n_dh = 20`, FWHM 0.1 d). The `.re2` meshes are committed
 (13 and 17 MB) because genbox is not available there.
+
+## 7. Pilobolus sporangium launch (preparation)
+
+Target: the discharge of a *Pilobolus kleinii* sporangium (Yafetto et al.
+2008, PLoS ONE 3:e3237): a 350 µm sporangium is pushed off the vesicle by a
+sap jet to ~9 m/s within 0.2 ms, then decelerates at ~1300 m/s² during
+0.3–1.2 ms of flight, 7–9x what an equivalent sphere's drag gives, while
+the sap spreads into a disc around it and a tail that breaks into ~100 µm
+drops. Re ≈ 200. The five steps of the hand-off, in order; each has its
+check.
+
+### 7.1 Separate EL and IBM filter widths
+
+ppiclF has one Gaussian filter, and its width sets the ghost-exchange and
+truncation distances. The EL projection (force, φ_p) wants a width of a
+few particle spacings; the IBM spreading wants one to two grid spacings.
+Patch `0006-per-particle-gaussian-width` gives every ppiclF particle its
+own FWHM in an rprop slot (`PPICLF_R_JFILT`, registered through the new
+`ppiclf_solve_InitParticleFilter(jfilt)`): the projection loop uses that
+particle's σ for both the exponent and the normalisation (real and ghost
+particles, grid and sub-bin projections), and the global filter is set to
+the larger of the two widths so every neighbour is still reached. A
+per-particle width wider than the global one aborts. `Config::filterWidthIbm`
+(0: same as `filterWidth`) is what the markers get; EL particles get
+`filterWidth`, including injected parcels; the body-stability check and the
+marker thickness use the IBM width.
+
+Checks: with equal widths `el_ibm_collision` reproduces its previous result
+to all printed digits but the last of the slip (4.843e-3 → 4.844e-3) and
+`ibm_sphere_re100` bit for bit (C_d 1.2860). With EL 0.06 and IBM 0.03
+(`filter_width_ibm` in the collision par) the run is stable (the body
+threshold ρ_b/ρ_f > 1.64 instead of 2.28), the marker slip halves
+(4.8e-3 → 6.7e-3 of the body speed at the end, 2.0e-2 → 1.2e-2 during the
+impact), the sphere ends at u = 0.2718 instead of 0.2710, and the global
+momentum closes to −4.5e-3 of P_0 against −3.2e-3 with equal widths: the
+same explicit-lag loss, slightly larger because the narrower shell reacts
+faster at the contact.
+
+### 7.2 Prescribed-motion bodies
+
+`Body::prescribed`: the UDF sets x, v (and w) for the new time before
+`step()`; the coupling pushes that state to ppiclF before the particle
+sub-steps so the markers force the fluid to the new velocity, skips the
+dynamics for that body (periodic wrap only) and still reports the marker
+force sum in `hydroForceOnBodies()`. For an accelerating body the force on
+the body proper is that sum plus ρ_f V dU/dt, the inertia of the fluid
+inside the shell (Uhlmann); the Pilobolus UDF adds it.
+
+Check (`cases/ibm_sphere_moving`): the `ibm_sphere_re100` box made fully
+periodic, fluid at rest, the sphere driven at −u_in in y from y = +5d. In
+the body frame that is the fixed sphere in a stream. Over U t/d = 8–10 the
+moving sphere gives C_d = 1.257 ± 0.029 (mean ± std over 11 reports) against
+1.289 for the fixed sphere on the same grid, i.e. 2.4 % lower with a
+±2 % step-to-step oscillation the fixed case does not have: the markers of
+a moving body cross GLL cells, and the explicit direct forcing samples the
+grid velocity at new relative positions every step. The oscillation
+averages out; a finer grid or a wider IBM Gaussian reduces it. The
+periodic 15d column also lets the sphere approach its own start-up
+disturbance after 10d of travel (the last report drops 5 %), so the
+comparison window is U t/d < 10. The run itself was slow (25 s/step on the
+laptop against 2.5 s/step fixed, with one step of 2000 s): the machine
+slept during the run; the moving-body cost on Tuolumne (settling sphere,
+4.2 s/step on 8 GPUs against 1.1 s/step fixed) is a separate, real item.
+
+### 7.3 Fixed sphere at Re 300 (prepared, needs Tuolumne)
+
+`cases/ibm_sphere_re300`: the Re 100 hires mesh and interface (32 x 60 x 32,
+N = 7, markers d/50, FWHM 0.04 d), ν = 1/300. Johnson & Patel (1999):
+C_d = 0.656 (time mean), St = f d/U = 0.137 (hairpin shedding, period
+U t/d = 7.3). The wake needs U t/d ≈ 50 to settle and ~5 periods to
+measure St, so 20 000 steps at dt = 5e-5: `numSteps = 5000` chunks with
+`startFrom`, 1.1 s/step on 8 MI300A → 1.5 h per chunk. Acceptance: C_d within
+the Re 100 hires error (+10 %) and St within 5 %.
+
+```bash
+cases/ibm_sphere_re300/setup.sh
+flux batch -q pbatch -N 2 -B <bank> -t 3h -n 8 -g 1 --output=build/re300_1.out \
+    scripts/tuolumne_batch.sh cases/ibm_sphere_re300 sphere 8
+# then startFrom = "sphere0.f00001" in sphere.par and resubmit for chunks 2-4
+```
+
+### 7.4 Single-phase launch (`cases/pilobolus_launch`)
+
+SI units. Air at rest (ρ 1.2, μ 1.8e-5), a box x ∈ [−2, 10] mm
+(hires: [−3, 13]), y, z ∈ [−5, 5] mm, far-field u = 0 on five faces and an
+outflow at x+; a fine band |y|, |z| < 0.6 mm (hires 0.44) along the flight
+path with 0.2 mm elements at N = 5 (40 µm ≈ d/9; hires 0.08 mm at N = 7,
+11 µm ≈ d/30), graded outside; 11 760 elements (hires 105 800, 54M points).
+The sporangium is an equivalent sphere d = 0.35 mm, ρ_b = 1150, driven from
+x = 0.25 mm by the measured history: a half-cosine rise to v_max = 8.6 m/s
+in t_rise = 0.22 ms (peak acceleration 6e4 m/s²), then v = v_max −
+1300 (t − t_rise); or, with `trajectory = file.csv` (t_us, speed), the
+smoothed measurement. The UDF reports x, v, a, the marker force sum F_m, the
+force on the body F = F_m + ρ_f V a, the drag coefficient and the
+deceleration F/(ρ_b V) that force alone would give; `free_flight = 1`
+releases the body at t_rise and reports the deceleration of a dry sphere.
+The difference between the measured 1300 m/s² and the dry deceleration is
+the sap's contribution, the target of step 5. dt from the CFL on the band's
+edge GLL spacing: 1 µs (hires 0.3 µs). The laptop grid needs 8 ranks on
+macOS (nek interface < 2 GB per rank). Added mass is irrelevant at
+ρ_b/ρ_f ≈ 960; the wake history effect is what the simulation resolves.
+

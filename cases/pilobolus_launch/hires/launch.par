@@ -1,0 +1,43 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 7
+stopAt = endTime
+# dt from the CFL on the band's edge GLL spacing (0.08 mm / 7 -> first
+# interval 5 um at 9 m/s: dt 0.3 us at CFL 0.5); 4000 steps to 1.2 ms
+endTime = 1.2e-3
+dt = 3.0e-7
+timeStepper = tombo2
+checkpointControl = steps
+checkpointInterval = 500
+
+[MESH]
+# launch.box: x in [-3, 13] mm, y, z in [-5, 5] mm, 200 x 23 x 23 elements,
+# fine band |y|,|z| < 0.44 mm with 0.08 mm elements (N = 7: 11 um ~ d/30),
+# 105 800 elements, 54M points: Tuolumne, 2-4 nodes, chunks of 500 steps
+# with restart (startFrom) if the queue limit is short
+file = "launch.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-6
+
+[FLUID VELOCITY]
+# 1: far field u = 0, 2: outflow at x+ (dynamic-pressure stabilised)
+boundaryTypeMap = udfDirichlet, zeroNeumann
+residualTol = 1e-8
+rho = 1.2
+viscosity = 1.8e-5
+
+[CASEDATA]
+diameter = 3.5e-4
+body_rho = 1150.0
+v_max = 8.6
+t_rise = 2.2e-4
+decel = 1300.0
+x_start = 2.5e-4
+free_flight = 0
+trajectory = ""
+# markers d/40, FWHM 0.05 d (the Re 100 hires interface was d/50, 0.04 d)
+marker_spacing = 8e-6
+filter_width = 1.6e-5
+report_interval = 50

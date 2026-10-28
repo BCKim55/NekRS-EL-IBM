@@ -1,0 +1,193 @@
+// Pilobolus sporangium launch, single phase (Pilobolus step 4): an IBM
+// sphere (equivalent sporangium, d = 0.35 mm) driven along +x through air at
+// rest by the measured velocity history v(t) (Yafetto et al. 2008: rest ->
+// v_max in t_rise, then a deceleration `decel`), from x_start in front of
+// the nozzle at the origin. Far field u = 0, outflow at x+.
+//
+// free_flight = 0: prescribed for the whole run. Reported every
+//   report_interval steps ("launch:"): x, v, a of the body, the marker force
+//   sum F_m (fluid force on body + internal fluid), the force on the body
+//   proper F = F_m + rho_f V a, C_d = -F_x / (rho_f v^2 pi d^2 / 8), and the
+//   deceleration that force alone would give the body, a_f = F_x / (rho_b V).
+//   The measured deceleration (~1300 m/s2) minus a_f is what the sap must
+//   supply.
+// free_flight = 1: prescribed until t_rise, then a free body under the
+//   fluid force and gravity: the deceleration of a dry sporangium.
+// trajectory = "file.csv" (t_us, speed): v(t) from the smoothed measurement
+//   instead of the analytic profile.
+
+#include <algorithm>
+#include <fstream>
+#include <sstream>
+
+#include "elibm.hpp"
+#include "fieldDump.hpp"
+
+static double diameter, bodyRho, vMax, tRise, decel, xStart, markerSpacing, filterWidth;
+static int freeFlight, reportInterval;
+static std::string trajectoryFile;
+static std::vector<double> trajT, trajV, trajX; // measured profile (SI)
+static elibm::Coupling *coupling = nullptr;     // never deleted (MPI resources)
+static double vPrev = 0;
+
+#ifdef __okl__
+
+void udfDirichlet(bcData *bc)
+{
+  if (isField("fluid velocity")) {
+    bc->uxFluid = 0.0;
+    bc->uyFluid = 0.0;
+    bc->uzFluid = 0.0;
+  }
+  if (isField("fluid pressure")) {
+    // outflow: dynamic-pressure stabilisation against backflow
+    const dfloat iU0delta = 10.0;
+    const dfloat un = bc->uxFluid * bc->nx + bc->uyFluid * bc->ny + bc->uzFluid * bc->nz;
+    const dfloat s0 = 0.5 * (1.0 - tanh(un * iU0delta));
+    bc->pFluid = -0.5 * (bc->uxFluid * bc->uxFluid + bc->uyFluid * bc->uyFluid + bc->uzFluid * bc->uzFluid) * s0;
+  }
+}
+
+#endif
+
+// analytic profile: half-cosine rise to v_max, then linear deceleration
+static void profile(double t, double &x, double &v, double &a)
+{
+  if (!trajT.empty()) {
+    // measured: piecewise-linear v, x by its integral, a by the slope
+    size_t i = 1;
+    while (i < trajT.size() - 1 && trajT[i] < t) {
+      i++;
+    }
+    const double w = (t - trajT[i - 1]) / (trajT[i] - trajT[i - 1]);
+    a = (trajV[i] - trajV[i - 1]) / (trajT[i] - trajT[i - 1]);
+    v = trajV[i - 1] + w * (trajV[i] - trajV[i - 1]);
+    x = trajX[i - 1] + (t - trajT[i - 1]) * 0.5 * (trajV[i - 1] + v);
+    if (t > trajT.back()) {
+      v = trajV.back();
+      a = 0;
+      x = trajX.back() + (t - trajT.back()) * v;
+    }
+    return;
+  }
+  if (t < tRise) {
+    const double s = M_PI * t / tRise;
+    v = 0.5 * vMax * (1 - std::cos(s));
+    a = 0.5 * vMax * M_PI / tRise * std::sin(s);
+    x = 0.5 * vMax * (t - tRise / M_PI * std::sin(s));
+  } else {
+    const double tau = t - tRise;
+    v = std::max(0.0, vMax - decel * tau);
+    a = v > 0 ? -decel : 0.0;
+    const double tauStop = vMax / decel;
+    const double te = std::min(tau, tauStop);
+    x = 0.5 * vMax * tRise + vMax * te - 0.5 * decel * te * te;
+  }
+}
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  auto get = [](const char *key, auto &v) { platform->par->extract("casedata", key, v); };
+  get("diameter", diameter);
+  get("body_rho", bodyRho);
+  get("v_max", vMax);
+  get("t_rise", tRise);
+  get("decel", decel);
+  get("x_start", xStart);
+  get("free_flight", freeFlight);
+  get("trajectory", trajectoryFile);
+  get("marker_spacing", markerSpacing);
+  get("filter_width", filterWidth);
+  get("report_interval", reportInterval);
+
+  if (!trajectoryFile.empty()) {
+    std::ifstream f(trajectoryFile);
+    nekrsCheck(!f.good(), comm, EXIT_FAILURE, "cannot read trajectory %s\n", trajectoryFile.c_str());
+    std::string line;
+    std::getline(f, line); // header: t_us,speed
+    double x = 0;
+    while (std::getline(f, line)) {
+      std::replace(line.begin(), line.end(), ',', ' ');
+      std::istringstream ss(line);
+      double tus, v;
+      if (!(ss >> tus >> v)) {
+        continue;
+      }
+      if (!trajT.empty()) {
+        x += 0.5 * (v + trajV.back()) * (tus * 1e-6 - trajT.back());
+      }
+      trajT.push_back(tus * 1e-6);
+      trajV.push_back(v);
+      trajX.push_back(x);
+    }
+    nekrsCheck(trajT.size() < 2, comm, EXIT_FAILURE, "trajectory %s has fewer than 2 rows\n", trajectoryFile.c_str());
+  }
+}
+
+void UDF_Setup()
+{
+  elibm::Config cfg;
+  platform->options.getArgs("FLUID DENSITY", cfg.rhof);
+  platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+  cfg.periodic = {false, false, false};
+  cfg.grav = {0.0, -9.81, 0.0};
+  cfg.filterWidth = filterWidth;
+  cfg.markerSpacing = markerSpacing;
+  cfg.qtl = false;
+  cfg.zeroMeanDiv = false;
+  coupling = new elibm::Coupling(nrs, cfg);
+
+  elibm::Body body;
+  body.radius = 0.5 * diameter;
+  body.rho = bodyRho;
+  body.prescribed = true;
+  double x, v, a;
+  profile(0.0, x, v, a);
+  body.x = {xStart + x, 0.0, 0.0};
+  body.v = {v, 0.0, 0.0};
+  vPrev = v;
+  coupling->addBody(body);
+  coupling->initialize();
+  const auto tot = coupling->totals(); // collective
+  if (platform->comm.mpiRank() == 0) {
+    printf("launch: d %.3e  rho_b/rho_f %.1f  v_max %.2f (Re %.0f)  t_rise %.2e  decel %.0f  markers %lld  mode %s%s\n", diameter,
+           bodyRho / cfg.rhof, vMax, vMax * diameter * cfg.rhof / cfg.mu, tRise, decel, tot.nMarker,
+           freeFlight ? "free flight after t_rise" : "prescribed", trajT.empty() ? "" : " (measured v(t))");
+  }
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  auto &body = coupling->bodies()[0];
+  const double dt = nrs->dt[0];
+  double x, v, a;
+  profile(time, x, v, a);
+  if (body.prescribed) {
+    body.x = {xStart + x, 0.0, 0.0};
+    body.v = {v, 0.0, 0.0};
+    if (freeFlight && time >= tRise) {
+      body.prescribed = false; // released with the velocity reached
+    }
+  } else {
+    a = (body.v[0] - vPrev) / dt; // free flight: measured from the body
+  }
+  vPrev = body.v[0];
+  coupling->step(time, tstep);
+
+  if (tstep > 0 && (tstep % reportInterval == 0 || nrs->lastStep)) {
+    const auto fm = coupling->hydroForceOnBodies()[0];
+    const double rhof = 1.2, V = body.volume();
+    const double ax = body.prescribed ? a : (body.v[0] - vPrev) / dt;
+    const double fx = fm[0] + rhof * V * ax; // force on the body proper
+    const double u = std::max(std::abs(body.v[0]), 1e-12);
+    const double cd = -fx / (0.5 * rhof * u * u * M_PI * diameter * diameter / 4.0) * (body.v[0] < 0 ? -1 : 1);
+    if (platform->comm.mpiRank() == 0) {
+      printf("launch: step %d  t %.4e  x %.4e  v %.4f  a %.4e  Fm %.4e %.4e %.4e  F %.4e  Cd %.4f  a_f %.4e  slip %.3e%s\n",
+             tstep, time, body.x[0], body.v[0], ax, fm[0], fm[1], fm[2], fx, cd, fx / (bodyRho * V), coupling->slipRms(),
+             body.prescribed ? "" : "  free");
+    }
+  }
+  if (nrs->lastStep) {
+    dumpPlane(nrs, "plane_z0.csv", 2, 0.0, 1e-12);
+  }
+}

@@ -1,0 +1,37 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 7
+stopAt = numSteps
+# Re 300 sheds hairpin vortices (St 0.137: period U t/d = 7.3); the wake
+# needs U t/d ~ 50 to settle and ~5 periods to measure, i.e. U t/d = 100 =
+# 20 000 steps. Run in chunks of 5000 (restart: startFrom = "sphere0.f0000N")
+numSteps = 5000
+dt = 5e-5
+timeStepper = tombo2
+checkpointInterval = 5000
+
+[MESH]
+# the ibm_sphere_re100/hires mesh (32 x 60 x 32 on 8d x 15d x 8d, N = 7),
+# copied by setup.sh; GPU node (Tuolumne, 8 MI300A: 1.1 s/step at Re 100)
+file = "sphere.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-7
+
+[FLUID VELOCITY]
+# 1: inflow uy = 1, 2: outflow
+boundaryTypeMap = udfDirichlet, zeroNeumann
+residualTol = 1e-9
+rho = 1.0
+viscosity = 3.3333333e-5
+
+[CASEDATA]
+# fixed sphere, Re = U d / nu = 300; Johnson & Patel (1999): C_d = 0.656
+# (time-averaged), St = f d / U = 0.137 (hairpin shedding)
+u_in = 1.0
+diameter = 0.01
+# same interface as the Re 100 hires case: markers d/50, FWHM 0.04 d
+marker_spacing = 2e-4
+filter_width = 4e-4
+report_interval = 20

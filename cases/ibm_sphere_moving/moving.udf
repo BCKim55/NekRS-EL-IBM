@@ -1,0 +1,75 @@
+// Prescribed-motion IBM sphere (Pilobolus step 2 check): the ibm_sphere_re100
+// box made fully periodic, fluid at rest, the sphere driven at u_body = -u_in
+// in y from y_start. In the body frame this is the fixed sphere of
+// ibm_sphere_re100 in a stream u_in (Re = 100), so the drag coefficient
+// C_d = F_y / (0.5 rho u_in^2 pi d^2/4) (drag opposes the -y motion) must match that case (1.286 at
+// U t/d = 10 on this grid; Johnson & Patel 1.09). Prescribed bodies: the UDF
+// sets x(t), v(t) for the new time before coupling->step(); the hydrodynamic
+// force is still reported (hydroForceOnBodies).
+
+#include "elibm.hpp"
+#include "fieldDump.hpp"
+
+static double uIn, diameter, yStart, markerSpacing, filterWidth;
+static int reportInterval;
+static elibm::Coupling *coupling = nullptr; // never deleted (MPI resources)
+
+#ifdef __okl__
+// no boundaries (fully periodic)
+#endif
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  platform->par->extract("casedata", "u_in", uIn);
+  platform->par->extract("casedata", "diameter", diameter);
+  platform->par->extract("casedata", "y_start", yStart);
+  platform->par->extract("casedata", "marker_spacing", markerSpacing);
+  platform->par->extract("casedata", "filter_width", filterWidth);
+  platform->par->extract("casedata", "report_interval", reportInterval);
+}
+
+void UDF_Setup()
+{
+  elibm::Config cfg;
+  platform->options.getArgs("FLUID DENSITY", cfg.rhof);
+  platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+  cfg.periodic = {true, true, true};
+  cfg.filterWidth = filterWidth;
+  cfg.markerSpacing = markerSpacing;
+  cfg.qtl = false;
+  coupling = new elibm::Coupling(nrs, cfg);
+
+  elibm::Body body;
+  body.radius = 0.5 * diameter;
+  body.rho = 1.0;
+  body.prescribed = true;
+  body.x = {0.0, yStart, 0.0};
+  body.v = {0.0, -uIn, 0.0};
+  coupling->addBody(body);
+  coupling->initialize();
+  const auto tot = coupling->totals(); // collective: every rank
+  if (platform->comm.mpiRank() == 0) {
+    printf("moving: Re %.1f  markers %lld\n", uIn * diameter / cfg.mu, tot.nMarker);
+  }
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  // prescribed trajectory at the new time (the coupling wraps x periodically)
+  auto &body = coupling->bodies()[0];
+  body.x = {0.0, yStart - uIn * time, 0.0};
+  body.v = {0.0, -uIn, 0.0};
+  coupling->step(time, tstep);
+
+  if (tstep > 0 && (tstep % reportInterval == 0 || nrs->lastStep)) {
+    const auto f = coupling->hydroForceOnBodies()[0];
+    const double cd = f[1] / (0.5 * 1.0 * uIn * uIn * M_PI * diameter * diameter / 4.0);
+    if (platform->comm.mpiRank() == 0) {
+      printf("moving: step %d  t %.5f  y %.5f  F %.6e %.6e %.6e  Cd %.4f  slip %.3e\n", tstep, time, body.x[1], f[0], f[1], f[2], cd,
+             coupling->slipRms());
+    }
+  }
+  if (nrs->lastStep) {
+    dumpPlane(nrs, "plane_z0.csv", 2, 0.0, 1e-9);
+  }
+}

@@ -22,6 +22,7 @@
 #include "elibm.hpp"
 
 static int nPartGlobal, reportInterval, snapshotInterval, substeps, qtl;
+static double filterWidthIbm = 0;
 static double bodyRadius, bodyRho, dp, rhop, cloudSpeed, cloudRadius, cloudXmin, cloudXmax;
 static double kn, restitution, filterWidth, markerSpacing;
 
@@ -158,6 +159,7 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
   get("restitution", restitution);
   get("substeps", substeps);
   get("filter_width", filterWidth);
+  get("filter_width_ibm", filterWidthIbm);
   get("marker_spacing", markerSpacing);
   get("qtl", qtl);
   get("report_interval", reportInterval);
@@ -171,6 +173,7 @@ void UDF_Setup()
   platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
   cfg.periodic = {true, true, true};
   cfg.filterWidth = filterWidth;
+  cfg.filterWidthIbm = filterWidthIbm;
   cfg.markerSpacing = markerSpacing;
   cfg.kn = kn;
   cfg.restitution = restitution;

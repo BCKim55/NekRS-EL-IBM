@@ -41,6 +41,8 @@ restitution = 0.9
 substeps = 10
 # Gaussian FWHM for projection and IBM spreading, IBM marker spacing (~h)
 filter_width = 0.06
+# IBM spreading width (0: same as filter_width); the EL projection keeps filter_width
+filter_width_ibm = 0
 marker_spacing = 0.025
 qtl = 1
 report_interval = 10

@@ -1,0 +1,212 @@
+diff -ru a/PPICLC.h b/PPICLC.h
+--- a/source/PPICLC.h	2026-10-27 18:09:43
++++ b/source/PPICLC.h	2026-10-27 18:10:22
+@@ -33,6 +33,7 @@
+     void ppiclc_solve_InitGaussianFilter (double *filt   , 
+                                           double *alpha  , 
+ 					  int    *ngrid  );
++    void ppiclc_solve_InitParticleFilter (int    *jfilt  );
+     void ppiclc_solve_InitBoxFilter      (double *filt   , 
+                                           int    *ngrid  );
+     void ppiclc_solve_InitParticle       (int    *imethod, 
+diff -ru a/PPICLF_OPT.h b/PPICLF_OPT.h
+--- a/source/PPICLF_OPT.h	2026-10-27 18:09:43
++++ b/source/PPICLF_OPT.h	2026-10-27 18:10:22
+@@ -16,11 +16,12 @@
+ 
+       INTEGER*4 PPICLF_NDIM, PPICLF_IMETHOD, PPICLF_IPERIODIC(3)
+      >         ,PPICLF_NGRIDS, PPICLF_CYCLE, PPICLF_IOSTEP
+-     >         ,PPICLF_IENDIAN, PPICLF_IWALLM
++     >         ,PPICLF_IENDIAN, PPICLF_IWALLM, PPICLF_JFILT
+       COMMON /PPICLF_OPT_PARAM_I/ PPICLF_NDIM, PPICLF_IMETHOD
+      >                           ,PPICLF_IPERIODIC, PPICLF_NGRIDS
+      >                           ,PPICLF_CYCLE, PPICLF_IOSTEP
+      >                           ,PPICLF_IENDIAN, PPICLF_IWALLM
++     >                           ,PPICLF_JFILT
+ 
+       REAL*8 PPICLF_FILTER, PPICLF_ALPHA, PPICLF_RK3COEF(3,3), PPICLF_DT
+      >      ,PPICLF_TIME, PPICLF_D2CHK(3)
+diff -ru a/ppiclf_solve.f b/ppiclf_solve.f
+--- a/source/ppiclf_solve.f	2026-10-27 18:09:43
++++ b/source/ppiclf_solve.f	2026-10-27 18:12:07
+@@ -150,6 +150,7 @@
+       ppiclf_iendian      = iendian
+ 
+       ppiclf_filter       = -1   ! filt default for no projection
++      ppiclf_jfilt        = 0    ! rprop slot of a per-particle Gaussian width (0: none)
+ 
+       ppiclf_iperiodic(1) = 1    ! periodic in x (== 0) 
+       ppiclf_iperiodic(2) = 1    ! periodic in y (==0)
+@@ -879,6 +880,36 @@
+       end
+ !-----------------------------------------------------------------------
+ #ifdef PPICLC
++      subroutine ppiclf_solve_InitParticleFilter(jfilt)
++     > bind(C, name="ppiclc_solve_InitParticleFilter")
++#else
++      subroutine ppiclf_solve_InitParticleFilter(jfilt)
++#endif
++!
++! Per-particle Gaussian width: rprop(jfilt,i) > 0 is that particle's FWHM
++! for the projection (0 or jfilt = 0: the global filter). The global width
++! set by InitGaussianFilter must be the largest one used, as it sets the
++! ghost and truncation distances.
++!
++      implicit none
++!
++      include "PPICLF"
++!
++      integer*4 jfilt
++!
++      if (.not.PPICLF_LFILTGAUSS)
++     >call ppiclf_exittr('InitGaussianFilter must be before '//
++     >                   'InitParticleFilter$',0.0d0,0)
++      if (jfilt .lt. 0 .or. jfilt .gt. PPICLF_LRP)
++     >call ppiclf_exittr('Invalid rprop slot for InitParticleFilter$'
++     >                  ,0.0d0,jfilt)
++
++      ppiclf_jfilt = jfilt
++
++      return
++      end
++c----------------------------------------------------------------------
++#ifdef PPICLC
+       subroutine ppiclf_solve_InitBoxFilter(filt,iwallm)
+      > bind(C, name="ppiclc_solve_InitBoxFilter")
+ #else
+@@ -1735,7 +1766,7 @@
+      >          kkp, ilow, ihigh, jlow, jhigh, klow, khigh, ie, jj, j1,
+      >          neltbc, ndum, nl, nii, njj, nrr, nlxyzep, iee, ndumdum
+       real*8 pi, d2chk2_sq, rdum, multfci, rsig, rdist2, rexp, rx2(3),
+-     >       rx22, ry22, rz22, rtmp2
++     >       rx22, ry22, rz22, rtmp2, rdumi, multfcj, rsigi, rfilt
+ !
+       if3d = .false.
+       if (ppiclf_ndim .eq. 3) if3d = .true.
+@@ -1775,7 +1806,22 @@
+       ! real particles
+       do ip=1,ppiclf_npart
+ 
+-         rproj(1 ,ip) = rdum
++         rdumi   = rdum
++         multfcj = multfci
++         if (ppiclf_jfilt .gt. 0 .and. ppiclf_lfiltgauss) then
++            rfilt = ppiclf_cp_map(PPICLF_LRS+ppiclf_jfilt,ip)
++            if (rfilt .gt. 0.0d0) then
++               if (rfilt .gt. ppiclf_filter)
++     >            call ppiclf_exittr('Particle filter > global$',
++     >                               rfilt,ip)
++               rsigi   = rfilt/(2.0d0*sqrt(2.0d0*log(2.0d0)))
++               multfcj = 1.0d0/(sqrt(2.0d0*pi)**2 * rsigi**2)
++               if (if3d) multfcj = multfcj**(1.5d0)
++               rdumi   = 1.0d0/(-2.0d0*rsigi**2)
++            endif
++         endif
++
++         rproj(1 ,ip) = rdumi
+          rproj(2 ,ip) = ppiclf_cp_map(ppiclf_jxgp,ip)
+          rproj(3 ,ip) = ppiclf_cp_map(ppiclf_jygp,ip)
+          if (if3d) 
+@@ -1785,7 +1831,7 @@
+          ic = 4
+          do j=idum+1,idum+PPICLF_LRP_GP
+             ic = ic + 1
+-            rproj(ic,ip) = ppiclf_cp_map(j,ip)*multfci
++            rproj(ic,ip) = ppiclf_cp_map(j,ip)*multfcj
+          enddo
+                     
+          iproj(1,ip)  = ppiclf_iprop(8,ip)
+@@ -1798,7 +1844,19 @@
+       ! ghost particles
+       do ip=1,ppiclf_npart_gp
+ 
+-         rproj(1 ,ip+ppiclf_npart) = rdum
++         rdumi   = rdum
++         multfcj = multfci
++         if (ppiclf_jfilt .gt. 0 .and. ppiclf_lfiltgauss) then
++            rfilt = ppiclf_rprop_gp(PPICLF_LRS+ppiclf_jfilt,ip)
++            if (rfilt .gt. 0.0d0) then
++               rsigi   = rfilt/(2.0d0*sqrt(2.0d0*log(2.0d0)))
++               multfcj = 1.0d0/(sqrt(2.0d0*pi)**2 * rsigi**2)
++               if (if3d) multfcj = multfcj**(1.5d0)
++               rdumi   = 1.0d0/(-2.0d0*rsigi**2)
++            endif
++         endif
++
++         rproj(1 ,ip+ppiclf_npart) = rdumi
+          rproj(2 ,ip+ppiclf_npart) = ppiclf_rprop_gp(ppiclf_jxgp,ip)
+          rproj(3 ,ip+ppiclf_npart) = ppiclf_rprop_gp(ppiclf_jygp,ip)
+          if (if3d) 
+@@ -1808,7 +1866,7 @@
+          ic = 4
+          do j=idum+1,idum+PPICLF_LRP_GP
+             ic = ic + 1
+-            rproj(ic,ip+ppiclf_npart) = ppiclf_rprop_gp(j,ip)*multfci
++            rproj(ic,ip+ppiclf_npart) = ppiclf_rprop_gp(j,ip)*multfcj
+          enddo
+                     
+          iproj(1,ip+ppiclf_npart)  = ppiclf_iprop_gp(2,ip)
+@@ -1980,7 +2038,8 @@
+      >          idum, jdum, kdum, ic, i, j, k, ip, ndum, il, ir, jl, jr,
+      >          kl, kr, jj, j1, iip, jjp, kkp
+       logical if3d
+-      real*8 pi, d2chk2_sq, rdum, rsig, multfci, rexp, rdist2
++      real*8 pi, d2chk2_sq, rdum, rsig, multfci, rexp, rdist2,
++     >       rdumi, multfcj, rsigi, rfilt
+ !
+ 
+       if3d = .false.
+@@ -2020,7 +2079,22 @@
+       ! real particles
+       do ip=1,ppiclf_npart
+ 
+-         rproj(1 ,ip) = rdum
++         rdumi   = rdum
++         multfcj = multfci
++         if (ppiclf_jfilt .gt. 0 .and. ppiclf_lfiltgauss) then
++            rfilt = ppiclf_cp_map(PPICLF_LRS+ppiclf_jfilt,ip)
++            if (rfilt .gt. 0.0d0) then
++               if (rfilt .gt. ppiclf_filter)
++     >            call ppiclf_exittr('Particle filter > global$',
++     >                               rfilt,ip)
++               rsigi   = rfilt/(2.0d0*sqrt(2.0d0*log(2.0d0)))
++               multfcj = 1.0d0/(sqrt(2.0d0*pi)**2 * rsigi**2)
++               if (if3d) multfcj = multfcj**(1.5d0)
++               rdumi   = 1.0d0/(-2.0d0*rsigi**2)
++            endif
++         endif
++
++         rproj(1 ,ip) = rdumi
+          rproj(2 ,ip) = ppiclf_cp_map(ppiclf_jxgp,ip)
+          rproj(3 ,ip) = ppiclf_cp_map(ppiclf_jygp,ip)
+          if (if3d)
+@@ -2030,7 +2104,7 @@
+          ic = 4
+          do j=idum+1,idum+PPICLF_LRP_GP
+             ic = ic + 1
+-            rproj(ic,ip) = ppiclf_cp_map(j,ip)*multfci
++            rproj(ic,ip) = ppiclf_cp_map(j,ip)*multfcj
+          enddo
+ 
+          iproj(1,ip) = 
+@@ -2045,7 +2119,19 @@
+       ! ghost particles
+       do ip=1,ppiclf_npart_gp
+ 
+-         rproj(1 ,ip+ppiclf_npart) = rdum
++         rdumi   = rdum
++         multfcj = multfci
++         if (ppiclf_jfilt .gt. 0 .and. ppiclf_lfiltgauss) then
++            rfilt = ppiclf_rprop_gp(PPICLF_LRS+ppiclf_jfilt,ip)
++            if (rfilt .gt. 0.0d0) then
++               rsigi   = rfilt/(2.0d0*sqrt(2.0d0*log(2.0d0)))
++               multfcj = 1.0d0/(sqrt(2.0d0*pi)**2 * rsigi**2)
++               if (if3d) multfcj = multfcj**(1.5d0)
++               rdumi   = 1.0d0/(-2.0d0*rsigi**2)
++            endif
++         endif
++
++         rproj(1 ,ip+ppiclf_npart) = rdumi
+          rproj(2 ,ip+ppiclf_npart) = ppiclf_rprop_gp(ppiclf_jxgp,ip)
+          rproj(3 ,ip+ppiclf_npart) = ppiclf_rprop_gp(ppiclf_jygp,ip)
+          if (if3d)
