@@ -749,6 +749,12 @@ with a period of 27 µs = the time to cross one 0.2 mm element at 7.5 m/s:
 the grid-crossing noise of 7.2 on a coarse grid (figure
 `scripts/pilobolus_launch.py` → `docs/img/pilobolus_launch.png`).
 
+Free flight (`free_flight = 1`, released at t_rise with 8.60 m/s): the dry
+sporangium loses only 0.12 m/s in the next 0.96 ms, a mean deceleration of
+125 m/s² (C_d 0.70–0.75, 10 % below Schiller–Naumann on this grid), against
+the measured 1300 m/s². Both runs agree on the answer to the hand-off's
+question: without the sap the sporangium would coast almost undecelerated.
+
 ![Pilobolus launch](img/pilobolus_launch.png)
 
 ### 7.5 Sap droplets and adhesion (`cases/pilobolus_launch/sap`)
