@@ -19,3 +19,4 @@ cases/*_fine/*.udf
 cases/el_ibm_adhesion/collision.{box,re2,udf}
 cases/pilobolus_launch/sap/launch.{box,re2,usr}
 cases/pilobolus_launch/hires/launch.{udf,usr}
+cases/ibm_sphere_re300/chunk_*.fld

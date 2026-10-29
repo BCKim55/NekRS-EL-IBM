@@ -714,6 +714,11 @@ flux batch -q pbatch -N 2 -B <bank> -t 3h -n 8 -g 1 --output=build/re300_1.out \
 # then startFrom = "sphere0.f00001" in sphere.par and resubmit for chunks 2-4
 ```
 
+On pdebug (2 nodes, 60 min) use `cases/ibm_sphere_re300/chunk.sh <k> [steps]`
+inside each allocation instead: 2000 steps for chunk 1 (JIT), 2500 after, 8
+chunks; it sets `startFrom`, keeps each chunk's last checkpoint as
+`chunk_<k>.fld` and writes the force history to `build/re300_chunk_<k>.out`.
+
 ### 7.4 Single-phase launch (`cases/pilobolus_launch`)
 
 SI units. Air at rest (ρ 1.2, μ 1.8e-5), a box x ∈ [−2, 10] mm
