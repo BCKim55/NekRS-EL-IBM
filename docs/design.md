@@ -259,6 +259,55 @@ CFL limit (a narrower filter makes the stopping stream a stronger local
 force); it needs dt = 1.25e-3 and was not run. A dt check was not run
 either, beyond the two dt that bracket the CFL limit.
 
+## 2b''. Droplet-driven jet vs a water jet (`cases/spray_jet_water`)
+
+Question: how close does a gas jet driven by water-like droplets come to a
+water jet? Quasi-2D slab 0 < x < 3, |y| < 0.8 (free-slip sides), z 0.1
+periodic, 1920 elements N = 5, ν = 5e-4, coflow u_co through the inflow
+plane, outflow at x = 3. Droplets: ρ_p/ρ_f = 833, d = 2e-3 (Stokes stopping
+length ≈ 40 slot widths, as a 100 µm water drop at 10 m/s from a 2 mm slot),
+injected at x = 0.5 from a slot w = 0.04 at u_jet = 10 with liquid volume
+fraction φ in the stream, i.e. kinematic momentum flux J = (ρ_p/ρ_f) φ u_jet²
+w. Sweep φ = 5e-6, 5e-5, 5e-4 (J 0.017, 0.17, 1.7; liquid/gas mass flux
+0.004, 0.04, 0.42). References, same mesh: (i) `inlet_jet = 1`, the same J as
+a top-hat velocity inlet of width w on x = 0, no droplets; (ii) Bickley with
+x0 and J fitted to (i); (iii) the liquid jet, u = u_jet, all momentum in the
+liquid, half-width w/2. Fields are time averages (`t_avg`); the droplet
+velocity is the parcel mean in x bins and the liquid momentum flux J_l =
+(ρ_p/ρ_f) φ u_jet w ⟨u_d⟩ (mass flux conserved). `sweep.sh`,
+`scripts/spray_jet_water.py`.
+
+| φ | u_co | u_d at x = 2 (u_jet 10) | liquid J at outflow | gas u_c / inlet jet u_c at x = 2 | min u (backflow) |
+|---|---|---|---|---|---|
+| 5e-6 | 0.05 | 1.9 | 4 % | 1.57 | 0.005 |
+| 5e-5 | 0.11 | 2.5 | 8 % | 0.49 | −0.48 |
+| 5e-4 | 0.25 | 4.1 | 23 % | 0.55 | −1.6 (inlet jet too) |
+
+Findings. Dilute: the droplets give the gas 96 % of their momentum inside
+the box, so the result is a spray-induced gas jet, not a water jet; because
+the momentum is deposited along the path the induced jet is narrower than
+the inlet jet (half-width 0.03–0.08 vs 0.05–0.18) and faster on the
+centreline beyond x ≈ 1.3, while the inlet jet follows Bickley within 4 %.
+Dense: the droplets keep 0.41 u_jet at x = 2 and 0.23 at the outflow, the
+liquid holds 23 % of J at the outflow and the gas jet stays about the slot
+width, i.e. "liquid core plus a thin gas sheath", but the gas carries more
+than half of J from x ≈ 1.5 on. How water-jet-like the droplet jet is is set
+by (1) whether the distance of interest is shorter than the droplet stopping
+length and (2) the loading; with this d only x < 1 (12 slot widths) behaves
+as a water jet, and the liquid core itself is outside the EL model.
+
+Caveats. The droplet jet adds momentum without gas, so the coflow must
+supply its entrainment: at u_co = 0.05 the φ = 5e-5 case reversed the outer
+flow to −0.7 and its gas momentum flux read 111 % of J (backflow squared and
+the pressure term), hence u_co ∝ J^(1/3). At J = 1.7 even the inlet jet
+(Re_slot 516, unsteady) recirculates in the 1.6-wide box, Bickley is not
+drawn, and the average (t 3–5) is short and asymmetric; a wider box and a
+longer average need the GPU (0.15 s/step on 4 MI300A, 0.6 on 4 CPU ranks).
+The dense case needs dt = 2e-4 with `advectionSubCyclingSteps = 2` (CFL
+abort at 5e-4 without subcycling). The device path has no restart: the
+parcel state is not checkpointed, so a run that overruns its allocation
+leaves no fields.
+
 ## 2c. Round particle-laden jet (`cases/jet_modarress`, prepared)
 
 The standard experiment for two-way EL codes with solid particles: Modarress,

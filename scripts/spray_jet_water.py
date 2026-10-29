@@ -114,6 +114,7 @@ def main():
         uc_th = 0.4543 * (Jm**2 / (a.nu * np.maximum(xs - x0, 1e-9))) ** (1 / 3)
         b_th = 0.8814 / (0.2752 * (Jm / (a.nu**2 * np.maximum(xs - x0, 1e-9) ** 2)) ** (1 / 3))
         err = np.abs(uci[wdw] / uc_th[wdw] - 1).max()
+        laminar = x0 < a.xmin - 0.1 and err < 0.2  # a virtual origin inside the window = no similarity (unsteady jet)
         print(f"{os.path.basename(pdir)} phi {phi:g} J_inj {J:.4f} u_co {uco}: inlet jet J_gas window mean {Jm:.4f} "
               f"({Jm / J:.1%} of injected), x0 {x0:.3f}, u_c vs Bickley max err {err:.3f}, min u {umi[wdw].min():.3f}")
         print(f"   droplet-driven: J_gas window mean {Jp[wdw].mean():.4f} ({Jp[wdw].mean() / J:.1%} of injected), "
@@ -127,7 +128,10 @@ def main():
         ax = axs[0, col]
         ax.plot(xs, ucp, "C0", label="gas, droplet-driven")
         ax.plot(xs, uci, "C1", label="gas, velocity-inlet jet")
-        ax.plot(xs[wdw], uc_th[wdw], "k--", lw=0.8, label="Bickley (x0, J from the inlet jet)")
+        if laminar:
+            ax.plot(xs[wdw], uc_th[wdw], "k--", lw=0.8, label="Bickley (x0, J from the inlet jet)")
+        else:
+            ax.text(0.03, 0.95, "no Bickley fit: inlet jet unsteady", transform=ax.transAxes, fontsize=7, va="top")
         ax.set_ylabel("centreline excess $u_c$")
         ax.set_title(f"$\\phi_{{inj}}$ = {phi:g}, J = {J:.3g}, $u_{{co}}$ = {uco:g}, liquid/gas mass flux {rr * phi:.2g}", fontsize=10)
         ax = axs[1, col]
@@ -143,11 +147,12 @@ def main():
         ax.plot(xs, Ji / J, "C1", label="gas $J_g$ / J, velocity-inlet jet")
         ax.axhline(1, color="k", ls="--", lw=0.8, label="liquid jet: all in the liquid")
         ax.set_ylabel("momentum flux / injected J")
-        ax.set_ylim(-0.1, 1.3)
+        ax.set_ylim(-0.1, 1.5)
         ax = axs[3, col]
         ax.plot(xs, bp, "C0", label="droplet-driven")
         ax.plot(xs, bi, "C1", label="velocity-inlet jet")
-        ax.plot(xs[wdw], b_th[wdw], "k--", lw=0.8, label="Bickley")
+        if laminar:
+            ax.plot(xs[wdw], b_th[wdw], "k--", lw=0.8, label="Bickley")
         ax.axhline(0.5 * w, color="k", ls=":", lw=0.8, label="liquid jet: w/2")
         ax.set_ylabel("half-width b")
         ax.set_xlabel("x")
