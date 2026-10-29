@@ -32,7 +32,8 @@ inline std::vector<double> elRows()
   return rows;
 }
 
-inline void writeSnapshot(Coupling &coupling, double time, int tstep)
+// all EL rows (kElCols each) on rank 0, empty elsewhere; collective
+inline std::vector<double> gatherElRows()
 {
   auto comm = platform->comm.mpiComm();
   const auto rows = elRows();
@@ -47,6 +48,12 @@ inline void writeSnapshot(Coupling &coupling, double time, int tstep)
     all.resize(displs.back() + counts.back());
   }
   MPI_Gatherv(rows.data(), n, MPI_DOUBLE, all.data(), counts.data(), displs.data(), MPI_DOUBLE, 0, comm);
+  return all;
+}
+
+inline void writeSnapshot(Coupling &coupling, double time, int tstep)
+{
+  const auto all = gatherElRows();
   if (platform->comm.mpiRank() != 0) {
     return;
   }

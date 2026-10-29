@@ -1,0 +1,54 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+numSteps = 2400
+dt = 5e-3
+timeStepper = tombo2
+checkpointControl = steps
+checkpointInterval = 200
+
+[MESH]
+# 16 x 8 x 8 elements on [0,2] x [0,1] x [0,1] (genbox < stream.box)
+file = "stream.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-8
+
+[FLUID VELOCITY]
+# inflow u_x = u_in at x = 0, outflow at x = 2; y, z periodic
+boundaryTypeMap = udfDirichlet, zeroNeumann
+residualTol = 1e-10
+rho = 1.0
+viscosity = 0.005
+
+[CASEDATA]
+# uniform stream; Re_D = u_in D / nu = 30
+u_in = 0.5
+# IBM sphere (D = 0.3) held in place at (body_x, y_c, z_c); 0: free to move
+body_radius = 0.15
+body_x = 0.8
+body_fixed = 1
+# EL particles: d_p = D/30, injected every step at x = inject_x with the
+# stream velocity, in the mid-plane z = z_c (a sheet, so the x-y view is the
+# whole picture) and |y - y_c| < inject_half_width (< R: every particle is
+# aimed at the sphere); Stokes number rho_p d_p^2 u_in / (18 mu D) = 3.7
+dp = 0.01
+rhop = 2000.0
+inject_x = 0.1
+inject_half_width = 0.12
+inject_per_step = 1
+# soft-sphere contact (EL-EL and EL-IBM), no adhesion; contact time ~ 4.5e-3,
+# resolved by 10 particle sub-steps per fluid step
+kn = 500.0
+restitution = 0.9
+substeps = 10
+attach = 0
+# Gaussian FWHM for projection and IBM spreading, IBM marker spacing (~h)
+filter_width = 0.06
+filter_width_ibm = 0
+marker_spacing = 0.025
+qtl = 1
+report_interval = 20
+snapshot_interval = 10

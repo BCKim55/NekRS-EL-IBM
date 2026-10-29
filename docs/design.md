@@ -870,3 +870,32 @@ of the sap ligament/tail between the launched mass and the sporangiophore
 the sap disc than the equivalent sphere; both are open. Figure: bottom row
 of `docs/img/pilobolus_launch.png` (droplet counts, stuck mass, sap
 momentum; the sap curves in the upper panels are the loaded sporangium).
+
+### 7.6 Particle stream at a held sphere (`cases/el_ibm_stream`)
+
+The continuous-injection counterpart of `el_ibm_collision`, as a test bed
+for EL-IBM and EL-EL contact before the liquid-bridge force: box 0 < x < 2,
+y and z periodic (0..1), inflow u = 0.5 at x = 0, outflow at x = 2,
+ν = 0.005 (Re_D 30), IBM sphere D = 0.3 held at (0.8, 0.5, 0.5), one EL
+particle per step (d_p = 0.01 = D/30, ρ_p 2000, St 3.7) born at x = 0.1 with
+the stream velocity in the mid-plane sheet, |y − 0.5| < 0.12 (birth
+positions 1.5 d_p apart). Soft-sphere contact k_n 500, e 0.9, 10 sub-steps,
+`attach = 0`. ppiclF removes the particles that leave through the outflow.
+Reported every step on rank 0 (`gatherElRows`, `src/elSnapshot.hpp`):
+particles in contact, distinct particles ever in contact and ever moving
+upstream (the robust collision count, since only a collision sends one
+upstream), sphere force and C_d. `scripts/plot_stream.py` (summary, gif),
+`scripts/snapshots_to_vtk.py` + `scripts/paraview_el_movie.py --view xy
+--color-by contact --state` for ParaView.
+
+Result (2400 steps, dt 5e-3, 0.49 s/step on 4 CPU ranks): 2400 injected,
+1445 collided (60 %), 1265 left, ~1130 in the box at steady state from
+t ≈ 7; no particle inside the sphere at any snapshot; C_d 4.7 → 2.9 while
+the particle-laden wake and the momentum the particles give the gas
+develop. A contact lasts about one step, so the end-of-step contact flag
+misses some; the upstream count is the one to use. After the collisions the
+sheet spreads over the whole periodic z (median |z − z_c| 0.18 at t = 12):
+EL-EL contacts and the 3D flow round the sphere scatter the particles, so
+the x-y view is a projection. A planar option (zero z force on the
+particles) would be the next step for a truly 2D picture.
+
