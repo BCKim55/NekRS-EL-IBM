@@ -920,8 +920,8 @@ cylinder), 0.3 s. The slab must be thicker than the ppiclF ghost cutoff
 plane is horizontal).
 
 Result: 1000 droplets injected, 619 sent upstream by a collision, 756 left,
-~250 in the slab; none inside the cylinder; droplets stay within 0.3 mm of
-the mid-plane (median), unlike the 3D sphere case. The cylinder accelerates
+~250 in the slab; none inside the cylinder; half of the droplets stay within 0.13 mm of
+the mid-plane, 90 % within 0.8 mm (EL-EL contacts still scatter them in z). The cylinder accelerates
 downstream at ~0.15 m/s² (droplet impulses + drag; mass 1.9e-5 kg), reaching
 0.043 m/s and x = 14.7 mm at 0.3 s, and spins weakly (|ω| < 0.02 rad/s).
 C_d (on u_in, D, L) 2.2 falling to 2.0 as the cylinder moves with the
