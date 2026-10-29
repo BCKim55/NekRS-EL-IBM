@@ -1,0 +1,13 @@
+base.rea
+-3                     spatial dimension  ( < 0 --> generate .rea/.re2 pair)
+1                      number of fields
+#=======================================================================
+# Open quasi-2D slab for the droplet-driven plane jet: inflow x=0,
+# outflow x=3, symmetry y = +-0.8, periodic z
+#=======================================================================
+Box
+-60  -32  -1                                         nelx,nely,nelz
+0 3 1.                                               x0,x1,ratio
+-0.8 0.8 1.                                          y0,y1,ratio
+0 0.1 1.                                             z0,z1,ratio
+v  ,O  ,SYM,SYM,P  ,P                                bc's  (3 chars each!)

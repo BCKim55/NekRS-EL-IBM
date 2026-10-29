@@ -1,0 +1,175 @@
+// Droplet-driven plane jet with water-like droplets (device particle path,
+// src/elgpu.hpp): is the gas flow induced by a dense stream of droplets a
+// jet, and how much of the injected momentum stays with the liquid (a water
+// jet keeps all of it)?  inlet_jet = 1 replaces the droplets by a top-hat
+// velocity inlet of the same kinematic momentum flux J on the x = 0 plane
+// (gas-only reference). scripts/spray_jet_water.py compares the runs.
+//
+// Output: field_final.csv (GLL u at the end), field_avg.csv (time average
+// from t_avg), parcels_final.csv (droplet x, y, z, u at the end).
+
+#include "elgpu.hpp"
+#include "jet_common.hpp"
+
+static JetParams jp;
+static JetInjector *injector = nullptr;
+static elgpu::Coupling *coupling = nullptr; // never deleted (MPI resources)
+static double uCo, uSlot = 0, tAvg = 0;
+static int inletJet = 0, nAvg = 0;
+static std::vector<dfloat> Uavg;
+
+#ifdef __okl__
+
+void udfDirichlet(bcData *bc)
+{
+  if (isField("fluid velocity")) {
+    // top-hat slot of width p_wSlot about y = 0, edges smoothed over 0.1 w
+    const dfloat e = (fabs(bc->y) - 0.5 * p_wSlot) / (0.1 * p_wSlot);
+    bc->uxFluid = p_uCo + (p_uSlot - p_uCo) * 0.5 * (1.0 - tanh(e));
+    bc->uyFluid = 0.0;
+    bc->uzFluid = 0.0;
+  }
+  if (isField("fluid pressure")) {
+    // outflow: dynamic-pressure stabilisation against backflow (as hemi)
+    const dfloat iU0delta = 10.0;
+    const dfloat un = bc->uxFluid * bc->nx + bc->uyFluid * bc->ny + bc->uzFluid * bc->nz;
+    const dfloat s0 = 0.5 * (1.0 - tanh(un * iU0delta));
+    bc->pFluid = -0.5 * (bc->uxFluid * bc->uxFluid + bc->uyFluid * bc->uyFluid + bc->uzFluid * bc->uzFluid) * s0;
+  }
+}
+
+#endif
+
+static void dumpParcels(const std::string &name)
+{
+  auto &lpm = coupling->lpm();
+  const int n = lpm.numParticles(), off = lpm.fieldOffset();
+  std::vector<dfloat> x(std::max(off, 1)), y(std::max(off, 1)), z(std::max(off, 1)), v(std::max(off, 1));
+  if (n) {
+    lpm.getDOF("x").copyTo(x.data(), n);
+    lpm.getDOF("y").copyTo(y.data(), n);
+    lpm.getDOF("z").copyTo(z.data(), n);
+    lpm.getDOF("velocity").copyTo(v.data(), n);
+  }
+  std::vector<double> rows;
+  for (int i = 0; i < n; i++) {
+    rows.insert(rows.end(), {x[i], y[i], z[i], v[i]});
+  }
+  gatherRows(rows, 4, name);
+}
+
+// kinematic momentum flux per unit depth of the droplet stream
+static double momentumFlux(double rhof)
+{
+  return jp.rhop / rhof * jp.phiInj * jp.uJet * jp.uJet * jp.wSlot;
+}
+
+void UDF_LoadKernels(deviceKernelProperties &kernelInfo)
+{
+  elgpu::registerKernels(kernelInfo);
+  jp.read();
+  platform->par->extract("casedata", "u_co", uCo);
+  platform->par->extract("casedata", "inlet_jet", inletJet);
+  double rhof;
+  platform->options.getArgs("FLUID DENSITY", rhof);
+  uSlot = inletJet ? std::sqrt(momentumFlux(rhof) / jp.wSlot) : uCo;
+  kernelInfo.define("p_uCo") = uCo;
+  kernelInfo.define("p_uSlot") = uSlot;
+  kernelInfo.define("p_wSlot") = jp.wSlot;
+}
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  platform->par->extract("casedata", "t_avg", tAvg);
+}
+
+void UDF_Setup()
+{
+  auto mesh = nrs->meshV;
+  const auto offset = nrs->fluid->fieldOffset;
+
+  // start from the coflow
+  std::vector<dfloat> U(3 * offset, 0.0);
+  std::fill(U.begin(), U.begin() + mesh->Nlocal, uCo);
+  nrs->fluid->o_U.copyFrom(U.data(), 3 * offset);
+  Uavg.assign(3 * offset, 0.0);
+
+  double dt, rhof;
+  platform->options.getArgs("DT", dt);
+  platform->options.getArgs("FLUID DENSITY", rhof);
+  std::vector<dfloat> z(mesh->Nlocal);
+  mesh->o_z.copyTo(z.data(), mesh->Nlocal);
+  double lz[2] = {*std::min_element(z.begin(), z.end()), *std::max_element(z.begin(), z.end())};
+  MPI_Allreduce(MPI_IN_PLACE, &lz[0], 1, MPI_DOUBLE, MPI_MIN, platform->comm.mpiComm());
+  MPI_Allreduce(MPI_IN_PLACE, &lz[1], 1, MPI_DOUBLE, MPI_MAX, platform->comm.mpiComm());
+  const double Lz = lz[1] - lz[0];
+  const double J = momentumFlux(rhof);
+
+  if (!inletJet) {
+    elgpu::Config cfg;
+    cfg.rhof = rhof;
+    platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+    cfg.periodic = {false, false, true};
+    cfg.filterWidth = jp.filterWidth;
+    cfg.qtl = jp.qtl != 0;
+    coupling = new elgpu::Coupling(nrs, cfg);
+    injector = new JetInjector{jp, Lz, 0.0};
+    double t0;
+    platform->options.getArgs("START TIME", t0);
+    coupling->initialize({}, {}, {}, {}, t0, {});
+  }
+  if (platform->comm.mpiRank() == 0) {
+    double mu;
+    platform->options.getArgs("FLUID VISCOSITY", mu);
+    const double tauSt = jp.rhop * jp.dp * jp.dp / (18 * mu);
+    const double rep = rhof * jp.uJet * jp.dp / mu;
+    printf("spray: J %.4e  inlet_jet %d  u_slot %.4f  tau_p(Stokes) %.4f  Re_p0 %.1f  tau_p(SN) %.4f  "
+           "droplets/parcel %.3f  liquid mass flux / gas mass flux at u_jet %.3e\n",
+           J, inletJet, uSlot, tauSt, rep, tauSt / (1 + 0.15 * std::pow(rep, 0.687)), jp.weight(dt, Lz),
+           jp.rhop / rhof * jp.phiInj);
+  }
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  const double dt = nrs->dt[0];
+  if (!inletJet) {
+    if (tstep > 0) {
+      std::vector<double> x, v, d, rho, w;
+      injector->parcels(dt, x, v, d, rho, w);
+      coupling->inject(x, v, d, rho, w);
+    }
+    coupling->step(time, tstep);
+  }
+  if (time >= tAvg && tstep % 10 == 0) {
+    std::vector<dfloat> U(Uavg.size());
+    nrs->fluid->o_U.copyTo(U.data(), U.size());
+    for (size_t i = 0; i < U.size(); i++) {
+      Uavg[i] += U[i];
+    }
+    nAvg++;
+  }
+  if (tstep % jp.reportInterval == 0 || nrs->lastStep) {
+    double umax = platform->linAlg->max(nrs->meshV->Nlocal, nrs->fluid->o_U, platform->comm.mpiComm());
+    long long np = inletJet ? 0 : coupling->totals().nEl;
+    if (platform->comm.mpiRank() == 0) {
+      printf("spray: step %d  t %.3f  nparcel %lld  max u %.4f  navg %d\n", tstep, time, np, umax, nAvg);
+    }
+  }
+  if (nrs->lastStep) {
+    dumpField(nrs, "field_final.csv");
+    if (nAvg) {
+      std::vector<dfloat> U(Uavg.size());
+      nrs->fluid->o_U.copyTo(U.data(), U.size());
+      for (size_t i = 0; i < U.size(); i++) {
+        Uavg[i] /= nAvg;
+      }
+      nrs->fluid->o_U.copyFrom(Uavg.data(), Uavg.size());
+      dumpField(nrs, "field_avg.csv");
+      nrs->fluid->o_U.copyFrom(U.data(), U.size());
+    }
+    if (!inletJet) {
+      dumpParcels("parcels_final.csv");
+    }
+  }
+}
