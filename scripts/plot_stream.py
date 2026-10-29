@@ -71,8 +71,15 @@ def main():
     ap.add_argument("--xlim", type=float, nargs=2, default=(0.0, 2.0))
     ap.add_argument("--ylim", type=float, nargs=2, default=(0.1, 0.9))
     ap.add_argument("--gif", action="store_true")
+    ap.add_argument("--scale", type=float, default=1.0, help="multiply coordinates (e.g. 1000 for m -> mm)")
+    ap.add_argument("--body", default="held IBM sphere", help="body name for the titles")
     a = ap.parse_args()
     frames = load(a.case)
+    for _, _, el, b in frames:
+        for k in ("x", "y", "z"):
+            el[k] *= a.scale
+            b[k] *= a.scale
+        b["radius"] *= a.scale
     log = read_log(a.log) if a.log else {}
     out = os.path.join(a.case, "snapshots")
 
@@ -100,7 +107,7 @@ def main():
 
     ax = fig.add_subplot(3, 2, 6)
     if log:
-        ax.plot(log["t"], log["Cd"], "k-", label="sphere $C_d$ (hydrodynamic force on $u_{in}$, D)")
+        ax.plot(log["t"], log["Cd"], "k-", label="body $C_d$ (hydrodynamic force on $u_{in}$, D)")
         ax.set_ylabel("$C_d$")
         ax.legend(fontsize=7, loc="upper left")
     ax2 = ax.twinx()
@@ -108,7 +115,7 @@ def main():
     ax2.set_ylabel("mean particle $u_x / u_{in}$", color="C3")
     ax.set_xlabel("t")
     ax.grid(alpha=0.3)
-    fig.suptitle("EL particles ($d_p$ = D/30) streaming at a held IBM sphere: soft-sphere collisions, no adhesion\n"
+    fig.suptitle(f"EL particles ($d_p$ = D/30) streaming at a {a.body}: soft-sphere collisions, no adhesion\n"
                  "(x-y view of the mid-plane sheet; circled: in contact at the end of the step)")
     fig.savefig(os.path.join(out, "stream_summary.png"), dpi=130, bbox_inches="tight")
     print("wrote", os.path.join(out, "stream_summary.png"))

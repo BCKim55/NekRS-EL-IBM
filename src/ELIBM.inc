@@ -18,3 +18,5 @@
      >       elibm_bmass(elibm_nbmax)
       common /elibm_body_r/ elibm_bx, elibm_bv, elibm_bw, elibm_brot,
      >                      elibm_brad, elibm_bmass
+      integer*4 elibm_bcyl(elibm_nbmax)
+      common /elibm_body_i/ elibm_bcyl

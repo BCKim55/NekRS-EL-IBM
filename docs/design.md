@@ -899,3 +899,33 @@ EL-EL contacts and the 3D flow round the sphere scatter the particles, so
 the x-y view is a projection. A planar option (zero z force on the
 particles) would be the next step for a truly 2D picture.
 
+### 7.7 Cylinder bodies and the quasi-2D droplet stream (`cases/el_ibm_cylinder`)
+
+`Body::length > 0` makes a body a cylinder with its axis along z spanning
+that length (the periodic slab thickness): volume πR²L, markers in rings on
+the lateral surface (no end caps, `nt x nz`, rings staggered by half a
+spacing), contact on the in-plane distance (`elibm_ContactForce` gets an
+`icyl` flag, passed through `ppiclc_elibm_SetBodies`), translation in x, y
+and spin about z only, I = ½ m R², and the IBM feedback bound uses 2 instead
+of 3 (shell volume 2πRLt over πR²L). Everything else (markers, impulses,
+attachment) is shared with the sphere.
+
+Case, SI units: slab 30 x 10 x 2 mm (24 x 8 x 1 elements, N 5), air
+(ρ 1.2, μ 1.8e-5), inflow 0.5 m/s, outflow, y and z periodic; cylinder
+D = 3 mm, ρ 1374, free, at (8, 5) mm; water droplets 100 µm every third
+step (3333/s) at x = 2 mm, |y − y_c| < 1.2 mm, mid-plane; k_n 1 N/m, e 0.9,
+20 sub-steps; dt 1e-4 with 2 advection sub-cycles (CFL 0.67 at the
+cylinder), 0.3 s. The slab must be thicker than the ppiclF ghost cutoff
+(~ filter width 0.6 mm; 0.5 mm was refused), hence 2 mm. No gravity (the
+plane is horizontal).
+
+Result: 1000 droplets injected, 619 sent upstream by a collision, 756 left,
+~250 in the slab; none inside the cylinder; droplets stay within 0.3 mm of
+the mid-plane (median), unlike the 3D sphere case. The cylinder accelerates
+downstream at ~0.15 m/s² (droplet impulses + drag; mass 1.9e-5 kg), reaching
+0.043 m/s and x = 14.7 mm at 0.3 s, and spins weakly (|ω| < 0.02 rad/s).
+C_d (on u_in, D, L) 2.2 falling to 2.0 as the cylinder moves with the
+stream; the 30 % blockage of the periodic y images raises it above the
+unbounded value (~1.4 at Re 100). `scripts/plot_stream.py --scale 1000
+--xlim 0 30 --ylim 0 10 --body ...`.
+

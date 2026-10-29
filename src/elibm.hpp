@@ -47,7 +47,8 @@ void ppiclc_elibm_SetBodies(int *nb,
                             double *w,
                             double *rot,
                             double *radius,
-                            double *mass);
+                            double *mass,
+                            int *cylinder);
 void ppiclc_elibm_PlaceMarkers();
 void ppiclc_elibm_BeginStep();
 void ppiclc_solve_InitParticleFilter(int *jfilt); // ppiclF patch 0006
@@ -61,6 +62,11 @@ using vec3 = std::array<double, 3>;
 struct Body {
   double radius = 0;
   double rho = 0;
+  // > 0: a cylinder with its axis along z spanning this length (the periodic
+  // slab thickness for a quasi-2D case): markers on the lateral surface,
+  // contact on the in-plane distance, motion in x, y and spin about z only
+  double length = 0;
+  bool cylinder() const { return length > 0; }
   bool fixed = false; // held in place: markers still force the fluid, the body does not move
   // driven: the UDF sets x, v (and w) for the new time before step(); the
   // markers enforce that motion and hydroForceOnBodies() still reports the
@@ -71,7 +77,7 @@ struct Body {
   vec3 v{};
   vec3 w{};
   std::array<double, 9> rot{1, 0, 0, 0, 1, 0, 0, 0, 1}; // body -> lab, column-major
-  double volume() const { return 4.0 / 3.0 * M_PI * radius * radius * radius; }
+  double volume() const { return cylinder() ? M_PI * radius * radius * length : 4.0 / 3.0 * M_PI * radius * radius * radius; }
 };
 
 struct ElParticle {
@@ -183,7 +189,7 @@ public:
     const double ibmWidth = cfg.filterWidthIbm > 0 ? cfg.filterWidthIbm : cfg.filterWidth;
     const double sigma = ibmWidth / (2 * std::sqrt(2 * std::log(2.0)));
     for (const auto &b : bodyList) {
-      const double minRatio = 1 + 3 * std::sqrt(2 * M_PI) * sigma / b.radius;
+      const double minRatio = 1 + (b.cylinder() ? 2 : 3) * std::sqrt(2 * M_PI) * sigma / b.radius;
       nekrsCheck(!b.fixed && !b.prescribed && b.rho <= minRatio * cfg.rhof,
                  comm(),
                  EXIT_FAILURE,
@@ -228,8 +234,12 @@ public:
     if (platform->comm.mpiRank() == 0) {
       for (size_t b = 0; b < bodyList.size(); b++) {
         const auto &body = bodyList[b];
-        const double area = 4 * M_PI * body.radius * body.radius;
-        const int nm = std::max(12, static_cast<int>(std::lround(area / (cfg.markerSpacing * cfg.markerSpacing))));
+        const bool cyl = body.cylinder();
+        const double area = cyl ? 2 * M_PI * body.radius * body.length : 4 * M_PI * body.radius * body.radius;
+        // cylinder: nz rings of nt markers on the lateral surface (no end caps: the slab is periodic)
+        const int nt = std::max(12, static_cast<int>(std::lround(2 * M_PI * body.radius / cfg.markerSpacing)));
+        const int nz = std::max(1, static_cast<int>(std::lround(body.length / cfg.markerSpacing)));
+        const int nm = cyl ? nt * nz : std::max(12, static_cast<int>(std::lround(area / (cfg.markerSpacing * cfg.markerSpacing))));
         const double golden = M_PI * (3.0 - std::sqrt(5.0));
         // Marker volume = surface share x the Gaussian's normal thickness
         // sqrt(2 pi) sigma: a Gaussian sheet of that thickness integrates to
@@ -239,11 +249,15 @@ public:
         // gain would be h / (sqrt(2 pi) sigma) < 1 and slip would linger.
         const double thickness = std::sqrt(2 * M_PI) * sigma;
         for (int m = 0; m < nm; m++) {
-          const double zr = 1.0 - (m + 0.5) * 2.0 / nm;
-          const double rr = std::sqrt(1.0 - zr * zr);
-          const vec3 ref = {body.radius * rr * std::cos(m * golden),
-                            body.radius * rr * std::sin(m * golden),
-                            body.radius * zr};
+          vec3 ref;
+          if (cyl) {
+            const double th = 2 * M_PI * (m % nt + 0.5 * ((m / nt) % 2)) / nt; // rings staggered by half a spacing
+            ref = {body.radius * std::cos(th), body.radius * std::sin(th), (m / nt + 0.5) * body.length / nz - 0.5 * body.length};
+          } else {
+            const double zr = 1.0 - (m + 0.5) * 2.0 / nm;
+            const double rr = std::sqrt(1.0 - zr * zr);
+            ref = {body.radius * rr * std::cos(m * golden), body.radius * rr * std::sin(m * golden), body.radius * zr};
+          }
           std::array<double, PPICLF_LRP> r{};
           r[PPICLF_R_JTYPE - 1] = PPICLF_TYPE_MARKER;
           r[PPICLF_R_JVOLP - 1] = area / nm * thickness;
@@ -396,7 +410,11 @@ public:
         size_t bmin = 0;
         double gmin = std::numeric_limits<double>::max();
         for (size_t b = 0; b < bodyList.size(); b++) {
-          const double gap = norm(minImage(sub(xp, bodyList[b].x))) - bodyList[b].radius;
+          vec3 d = minImage(sub(xp, bodyList[b].x));
+          if (bodyList[b].cylinder()) {
+            d[2] = 0;
+          }
+          const double gap = norm(d) - bodyList[b].radius;
           if (gap < gmin) {
             gmin = gap;
             bmin = b;
@@ -463,13 +481,19 @@ public:
         }
         const double mEff = (body.rho - cfg.rhof) * body.volume();
         const double mTot = mEff + buf[10 * b + 9]; // plus the stuck particles
-        const double iEff = 0.4 * mEff * body.radius * body.radius;
+        const bool cyl = body.cylinder();
+        const double iEff = (cyl ? 0.5 : 0.4) * mEff * body.radius * body.radius;
         attachedMassOnBody[b] = buf[10 * b + 9];
         for (int k = 0; k < 3; k++) {
           contactOnBody[b][k] = buf[10 * b + 6 + k] / dt;
+          if (cyl && k == 2) { // a cylinder stays in its plane and spins about z only
+            body.v[2] = body.w[0] = body.w[1] = 0;
+            body.w[2] += dt * buf[10 * b + 5] / iEff;
+            continue;
+          }
           body.v[k] += dt * ((buf[10 * b + k] + contactOnBody[b][k] + mTot * cfg.grav[k]) / mTot);
           body.x[k] += dt * body.v[k];
-          body.w[k] += dt * buf[10 * b + 3 + k] / iEff;
+          body.w[k] += cyl ? 0 : dt * buf[10 * b + 3 + k] / iEff;
           if (cfg.periodic[k]) {
             const double len = hi[k] - lo[k];
             body.x[k] = lo[k] + std::fmod(std::fmod(body.x[k] - lo[k], len) + len, len);
@@ -652,7 +676,9 @@ private:
   {
     int nb = bodyList.size();
     std::vector<double> x, v, w, rot, rad, mass;
+    std::vector<int> cyl;
     for (const auto &b : bodyList) {
+      cyl.push_back(b.cylinder());
       x.insert(x.end(), b.x.begin(), b.x.end());
       v.insert(v.end(), b.v.begin(), b.v.end());
       w.insert(w.end(), b.w.begin(), b.w.end());
@@ -666,7 +692,8 @@ private:
     rot.push_back(0);
     rad.push_back(0);
     mass.push_back(0);
-    ppiclc_elibm_SetBodies(&nb, x.data(), v.data(), w.data(), rot.data(), rad.data(), mass.data());
+    cyl.push_back(0);
+    ppiclc_elibm_SetBodies(&nb, x.data(), v.data(), w.data(), rot.data(), rad.data(), mass.data(), cyl.data());
   }
 
   // dt == nullptr: initial call, D phi_f/Dt has no history yet

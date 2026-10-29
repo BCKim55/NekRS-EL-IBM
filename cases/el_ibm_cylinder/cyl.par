@@ -1,0 +1,61 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+numSteps = 3000
+# CFL ~ 0.6 at the cylinder (GLL spacing 0.25 mm); 0.3 s
+dt = 1e-4
+timeStepper = tombo2
+advectionSubCyclingSteps = 2
+checkpointControl = steps
+checkpointInterval = 250
+
+[MESH]
+# 24 x 8 x 1 elements on [0,30] x [0,10] x [0,2] mm (genbox < cyl.box); the
+# slab must be thicker than the ppiclF ghost cutoff (~ filter_width)
+file = "cyl.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-8
+
+[FLUID VELOCITY]
+# air: inflow u_x = u_in at x = 0, outflow at x = 30 mm; y, z periodic
+boundaryTypeMap = udfDirichlet, zeroNeumann
+residualTol = 1e-10
+rho = 1.2
+viscosity = 1.8e-5
+
+[CASEDATA]
+# SI units. Air stream u_in; Re_D = u_in D / nu = 100
+u_in = 0.5
+# IBM cylinder along z (the slab thickness), D = 3 mm, rho 1374 kg/m3, free
+# to move in the plane and spin about z (body_fixed = 1 holds it); no gravity
+body_radius = 1.5e-3
+body_x = 8e-3
+body_rho = 1374.0
+body_fixed = 0
+# water droplets d_p = D/30 = 100 um, inject_per_step every inject_every
+# steps (3333 /s, 1.5 d_p apart along x) at x = inject_x with the stream
+# velocity, mid-plane sheet, |y - y_c| < inject_half_width (< R);
+# Stokes number rho_p d_p^2 u_in / (18 mu D) = 5.1
+dp = 1e-4
+rhop = 1000.0
+inject_x = 2e-3
+inject_half_width = 1.2e-3
+inject_per_step = 1
+inject_every = 3
+# soft-sphere contact (EL-EL and EL-IBM), no adhesion: m_p = 5.2e-10 kg,
+# contact time pi sqrt(m/k_n) = 7e-5 s, resolved by 20 sub-steps per
+# fluid step (5e-6 s); impact overlap u sqrt(m/k_n) ~ 0.1 d_p
+kn = 1.0
+restitution = 0.9
+substeps = 20
+attach = 0
+# Gaussian FWHM for projection and IBM spreading, IBM marker spacing (~h)
+filter_width = 6e-4
+filter_width_ibm = 0
+marker_spacing = 2.5e-4
+qtl = 1
+report_interval = 20
+snapshot_interval = 10

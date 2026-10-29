@@ -1,0 +1,14 @@
+base.rea
+-3                     spatial dimension  ( < 0 --> generate .rea/.re2 pair)
+1                      number of fields
+#=======================================================================
+# Quasi-2D slab (SI, m): inflow x = 0, outflow x = 0.03, periodic y and
+# z (2 mm thick: ppiclF needs it above the filter cutoff);
+# IBM cylinder D = 3 mm along z at (8 mm, 5 mm)
+#=======================================================================
+Box
+-24  -8  -1                                          nelx,nely,nelz
+0 0.03 1.                                            x0,x1,ratio
+0 0.01 1.                                            y0,y1,ratio
+0 0.002 1.                                          z0,z1,ratio
+v  ,O  ,P  ,P  ,P  ,P                                bc's  (3 chars each!)

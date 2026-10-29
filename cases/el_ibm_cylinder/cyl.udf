@@ -1,0 +1,211 @@
+// Water droplets (d_p = D/30) streaming in air at a free IBM cylinder in a
+// quasi-2D slab (SI units): one droplet per step is injected at the inlet
+// side with the stream velocity in the mid-plane and collides with the
+// cylinder (soft-sphere contact, EL-EL and EL-IBM, no adhesion); the
+// cylinder moves in the plane under the hydrodynamic and contact forces.
+// ppiclF path (src/elibm.hpp, Body::length > 0).
+//
+// Reported every `report_interval` steps:
+//   nEl, injected, exited : particles in the domain, injected so far, left
+//                           through the outflow (ppiclF removes them)
+//   contacts              : particles touching the sphere or another particle
+//                           at the end of the step (a contact lasts ~1 step)
+//   touched / bounced     : distinct particles seen in contact / with u_x < 0
+//                           so far (bounced is the robust collision count:
+//                           only a collision sends a particle upstream)
+//   F, Cd                 : hydrodynamic force on the cylinder, C_d on u_in, D, L
+//   body x u              : cylinder position and velocity (x)
+//   Pel                   : x momentum of the particles
+// Every `snapshot_interval` steps: snapshots/el_XXXXX.csv and body.csv
+// (scripts/plot_stream.py, scripts/snapshots_to_vtk.py).
+
+#include <random>
+#include <unordered_set>
+
+#include "elSnapshot.hpp"
+#include "elibm.hpp"
+
+static double rhof = 1, uIn, bodyRadius, bodyX, bodyRho, dp, rhop, injX, injHalfWidth, kn, restitution;
+static double filterWidth, filterWidthIbm = 0, markerSpacing;
+static int bodyFixed, injectPerStep, injectEvery = 1, substeps, attach, qtl, reportInterval, snapshotInterval;
+
+static std::unique_ptr<elibm::Coupling> coupling;
+static long long injected = 0;
+static std::unordered_set<long> touched, bounced; // rank 0
+static std::mt19937_64 gen(2026);
+static std::vector<double> recentY; // y of the last injected particles, to avoid overlaps at birth
+static double yc, zc;
+
+#ifdef __okl__
+
+void udfDirichlet(bcData *bc)
+{
+  if (isField("fluid velocity")) {
+    bc->uxFluid = p_uIn;
+    bc->uyFluid = 0.0;
+    bc->uzFluid = 0.0;
+  }
+  if (isField("fluid pressure")) {
+    const dfloat iU0delta = 10.0;
+    const dfloat un = bc->uxFluid * bc->nx + bc->uyFluid * bc->ny + bc->uzFluid * bc->nz;
+    const dfloat s0 = 0.5 * (1.0 - tanh(un * iU0delta));
+    bc->pFluid = -0.5 * (bc->uxFluid * bc->uxFluid + bc->uyFluid * bc->uyFluid + bc->uzFluid * bc->uzFluid) * s0;
+  }
+}
+
+#endif
+
+void UDF_LoadKernels(deviceKernelProperties &kernelInfo)
+{
+  platform->par->extract("casedata", "u_in", uIn);
+  kernelInfo.define("p_uIn") = uIn;
+}
+
+void UDF_Setup0(MPI_Comm comm, setupAide &options)
+{
+  auto get = [](const char *key, auto &v) { platform->par->extract("casedata", key, v); };
+  get("u_in", uIn);
+  get("body_radius", bodyRadius);
+  get("body_x", bodyX);
+  get("body_rho", bodyRho);
+  get("body_fixed", bodyFixed);
+  get("dp", dp);
+  get("rhop", rhop);
+  get("inject_x", injX);
+  get("inject_half_width", injHalfWidth);
+  get("inject_per_step", injectPerStep);
+  get("inject_every", injectEvery);
+  get("kn", kn);
+  get("restitution", restitution);
+  get("substeps", substeps);
+  get("attach", attach);
+  get("filter_width", filterWidth);
+  get("filter_width_ibm", filterWidthIbm);
+  get("marker_spacing", markerSpacing);
+  get("qtl", qtl);
+  get("report_interval", reportInterval);
+  get("snapshot_interval", snapshotInterval);
+}
+
+void UDF_Setup()
+{
+  auto mesh = nrs->meshV;
+  const auto offset = nrs->fluid->fieldOffset;
+  std::vector<dfloat> U(3 * offset, 0.0);
+  std::fill(U.begin(), U.begin() + mesh->Nlocal, uIn); // start from the uniform stream
+  nrs->fluid->o_U.copyFrom(U.data(), 3 * offset);
+
+  elibm::Config cfg;
+  platform->options.getArgs("FLUID DENSITY", cfg.rhof);
+  platform->options.getArgs("FLUID VISCOSITY", cfg.mu);
+  rhof = cfg.rhof;
+  cfg.periodic = {false, true, true};
+  cfg.zeroMeanDiv = false; // open domain (inflow / outflow)
+  cfg.filterWidth = filterWidth;
+  cfg.filterWidthIbm = filterWidthIbm;
+  cfg.markerSpacing = markerSpacing;
+  cfg.kn = kn;
+  cfg.restitution = restitution;
+  cfg.neighborWidth = dp;
+  cfg.substeps = substeps;
+  cfg.qtl = qtl != 0;
+  cfg.attachOnContact = attach != 0;
+
+  coupling = std::make_unique<elibm::Coupling>(nrs, cfg);
+  const auto lo = coupling->domainLo();
+  const auto hi = coupling->domainHi();
+  yc = 0.5 * (lo[1] + hi[1]);
+  zc = 0.5 * (lo[2] + hi[2]);
+
+  elibm::Body body;
+  body.radius = bodyRadius;
+  body.length = hi[2] - lo[2]; // cylinder through the periodic slab
+  body.rho = bodyRho;
+  body.fixed = bodyFixed != 0;
+  body.x = {bodyX, yc, zc};
+  coupling->addBody(body);
+  coupling->initialize();
+  const auto tot = coupling->totals(); // collective
+  if (platform->comm.mpiRank() == 0) {
+    const double D = 2 * bodyRadius;
+    printf("stream: Re_D %.1f  St %.2f  dp/D %.4f  markers %lld  %d particle(s) per step  cylinder mass %.3e kg  "
+           "droplet mass %.3e kg\n",
+           cfg.rhof * uIn * D / cfg.mu, rhop * dp * dp * uIn / (18 * cfg.mu * D), dp / D, tot.nMarker,
+           injectPerStep, bodyRho * M_PI * bodyRadius * bodyRadius * (hi[2] - lo[2]), rhop * M_PI / 6 * dp * dp * dp);
+  }
+}
+
+static void inject(double dt)
+{
+  std::vector<elibm::ElParticle> list;
+  if (platform->comm.mpiRank() == 0) {
+    std::uniform_real_distribution<double> uni(0.0, 1.0);
+    for (int i = 0; i < injectPerStep; i++) {
+      double y = 0;
+      for (int attempt = 0; attempt < 50; attempt++) { // birth positions at least 1.5 dp apart in y
+        y = yc + (2 * uni(gen) - 1) * injHalfWidth;
+        bool clear = true;
+        for (double q : recentY) {
+          clear = clear && std::abs(y - q) > 1.5 * dp;
+        }
+        if (clear) {
+          break;
+        }
+      }
+      recentY.push_back(y);
+      if (recentY.size() > 4) {
+        recentY.erase(recentY.begin());
+      }
+      elibm::ElParticle p;
+      p.x = {injX + uni(gen) * uIn * dt, y, zc + (uni(gen) - 0.5) * dp};
+      p.v = {uIn, 0, 0};
+      p.dp = dp;
+      p.rho = rhop;
+      list.push_back(p);
+    }
+  }
+  coupling->inject(list); // collective
+  injected += injectPerStep;
+}
+
+void UDF_ExecuteStep(double time, int tstep)
+{
+  if (tstep > 0 && tstep % injectEvery == 0) {
+    inject(injectEvery * nrs->dt[0]);
+  }
+  coupling->step(time, tstep);
+
+  // contact bookkeeping on rank 0 every step (a contact lasts about one step)
+  const auto all = elibm::gatherElRows();
+  int contacts = 0, backwards = 0;
+  if (platform->comm.mpiRank() == 0) {
+    for (size_t i = 0; i < all.size(); i += elibm::kElCols) {
+      const long id = std::lround(all[i]);
+      if (all[i + 7] > 0) {
+        contacts++;
+        touched.insert(id);
+      }
+      if (all[i + 4] < 0) {
+        backwards++;
+        bounced.insert(id);
+      }
+    }
+  }
+
+  if (tstep > 0 && (tstep % reportInterval == 0 || nrs->lastStep)) { // no force before the first step
+    const auto tot = coupling->totals();
+    const auto f = coupling->hydroForceOnBodies()[0];
+    const double D = 2 * bodyRadius;
+    const auto &b = coupling->bodies()[0];
+    const double cd = f[0] / (0.5 * rhof * uIn * uIn * D * b.length);
+    if (platform->comm.mpiRank() == 0) {
+      printf("stream: step %d  t %.3f  nEl %lld  injected %lld  exited %lld  contacts %d  u<0 now %d  touched %zu  "
+             "bounced %zu  F %.5e %.5e %.5e  Cd %.4f  Pel %.5e  slip %.3e  body x %.5e %.5e u %.5e %.5e w %.3e\n",
+             tstep, time, tot.nEl, injected, injected - tot.nEl, contacts, backwards, touched.size(), bounced.size(),
+             f[0], f[1], f[2], cd, tot.elMomentum[0], coupling->slipRms(), b.x[0], b.x[1], b.v[0], b.v[1], b.w[2]);
+    }
+  }
+  if (tstep % snapshotInterval == 0 || nrs->lastStep) {
+    elibm::writeSnapshot(*coupling, time, tstep);
+  }
+}

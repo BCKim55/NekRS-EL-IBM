@@ -54,11 +54,13 @@
       return
       end
 !-----------------------------------------------------------------------
-      subroutine ppiclc_elibm_SetBodies(nb,bx,bv,bw,brot,brad,bmass)
+      subroutine ppiclc_elibm_SetBodies(nb,bx,bv,bw,brot,brad,bmass,
+     >                                  bcyl)
      > bind(C, name="ppiclc_elibm_SetBodies")
 !
 ! Rigid-body state, one entry per body: centre, velocity, angular
-! velocity, rotation matrix (body -> lab, column-major), radius, mass.
+! velocity, rotation matrix (body -> lab, column-major), radius, mass,
+! 1 for a cylinder along z (contact on the in-plane distance).
 !
       implicit none
 !
@@ -67,6 +69,7 @@
 !
       integer*4 nb
       real*8 bx(3,*), bv(3,*), bw(3,*), brot(3,3,*), brad(*), bmass(*)
+      integer*4 bcyl(*)
 !
       integer*4 b, i, j
 !
@@ -85,6 +88,7 @@
          enddo
          elibm_brad(b)  = brad(b)
          elibm_bmass(b) = bmass(b)
+         elibm_bcyl(b)  = bcyl(b)
       enddo
 
       return
@@ -184,9 +188,10 @@
       return
       end
 !-----------------------------------------------------------------------
-      subroutine elibm_ContactForce(xi,vi,ri,rmi,xj,vj,rj,rmj,f)
+      subroutine elibm_ContactForce(xi,vi,ri,rmi,xj,vj,rj,rmj,icyl,f)
 !
-! Normal spring-dashpot force on i from j (zero without overlap).
+! Normal spring-dashpot force on i from j (zero without overlap);
+! icyl = 1: j is a cylinder along z, use the in-plane distance.
 !
       implicit none
 !
@@ -194,6 +199,7 @@
       include "ELIBM.inc"
 !
       real*8 xi(3), vi(3), ri, rmi, xj(3), vj(3), rj, rmj, f(3)
+      integer*4 icyl
 !
       real*8 d(3), dist, delta, rn(3), vn, rmeff, eta, rpi2, rle
       integer*4 k
@@ -206,6 +212,7 @@
          d(k) = xi(k) - xj(k)
       enddo
       call elibm_MinImage(d)
+      if (icyl .eq. 1) d(3) = 0.0d0
       dist  = sqrt(d(1)**2 + d(2)**2 + d(3)**2)
       delta = ri + rj - dist
       if (delta .le. 0.0d0 .or. dist .le. 0.0d0) return
@@ -332,7 +339,7 @@
             call elibm_ContactForce(ppiclf_y(PPICLF_JX,i),
      >         ppiclf_y(PPICLF_JVX,i),0.5d0*dp,rmass,
      >         elibm_bx(1,b),elibm_bv(1,b),elibm_brad(b),
-     >         elibm_bmass(b),fb)
+     >         elibm_bmass(b),elibm_bcyl(b),fb)
             if (elibm_iattach .eq. 1 .and.
      >          (fb(1).ne.0.0d0 .or. fb(2).ne.0.0d0 .or.
      >           fb(3).ne.0.0d0)) then
@@ -499,7 +506,7 @@
      >   call elibm_RigidVel(rpropj,vj)
       call elibm_ContactForce(yi(PPICLF_JX),vi,
      >   0.5d0*rpropi(PPICLF_R_JDP),rmi,
-     >   yj(PPICLF_JX),vj,0.5d0*rpropj(PPICLF_R_JDP),rmj,f)
+     >   yj(PPICLF_JX),vj,0.5d0*rpropj(PPICLF_R_JDP),rmj,0,f)
 
       do k=1,3
          ppiclf_ydotc(PPICLF_JVX-1+k,i) =
