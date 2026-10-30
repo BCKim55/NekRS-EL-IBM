@@ -929,3 +929,40 @@ stream; the 30 % blockage of the periodic y images raises it above the
 unbounded value (~1.4 at Re 100). `scripts/plot_stream.py --scale 1000
 --xlim 0 30 --ylim 0 10 --body ...`.
 
+### 7.8 10 m/s droplet stream at a free sphere (`cases/el_ibm_sphere_u10`)
+
+Same udf as the cylinder case (`cyl.udf`, symlinked) with the switches
+`body_cylinder 0`, `planar 0`, `periodic_y/z 0` and three additions made for
+this case:
+
+- **Inlet ramp** `t_ramp`: the Dirichlet inflow rises linearly from rest to
+  `u_in` over `t_ramp` and the field starts at rest. An impulsive 10 m/s start
+  blew up within 10 steps.
+- **`planar`** (`Config::planar`, `elibm_iplanar`): zeroes the EL z velocity,
+  z force and z motion. Needed for quasi-2D slabs because EL-EL contacts in a
+  sheet kick droplets across a thin periodic slab (one reached w = 8 m/s and
+  blew the run up); unused in 3D.
+- **Side boundaries.** With zero-pressure outflow on the y and z faces the run
+  blew up at ~6 ms with the velocity maximum on the inlet corner edges (x ≈ 0,
+  y or z = 0 or 10 mm), independent of qtl and of the droplets: a 10 m/s
+  Dirichlet inlet meeting an outflow face along its edge is not well posed in
+  nekRS. The sides are therefore free-stream Dirichlet (`v`, u = u_in). If
+  outflow sides are required, smooth the inlet profile to zero at the edges and
+  widen the box.
+
+Case, SI units: box 30 x 10 x 10 mm (24 x 8 x 8 elements, N 5), air, inflow
+10 m/s ramped over 2 ms, sphere D = 3 mm, ρ 1374, free, at (8, 5, 5) mm;
+water droplets 100 µm every 6th step (33 333/s) in a 1.2 mm disc at
+x = 2 mm; k_n 500 N/m, e 0.9, 30 sub-steps; dt 5e-6 with 2 advection
+sub-cycles (CFL 0.6, a 10-step excursion to 1.34 at 6 ms), 6000 steps =
+30 ms, 1.9 s/step on 4 CPU ranks.
+
+Result: 1000 droplets injected, 636 collided (701 bounces), 931 left, 69 in
+the box at the end, none inside the sphere. The sphere accelerates at
+~21 m/s² to u = 0.63 m/s and x = 17.3 mm at 30 ms: drag on u_in gives
+C_d ≈ 0.45 (2e-4 N, ~10 m/s² on the 1.9e-5 kg sphere), and the droplet
+impulses (64 % of a 1.7e-4 N momentum flux, returned with e 0.9) supply the
+rest. 70 % of the droplets in the box stay inside the injection disc; the
+collided ones are scattered to r up to 4.7 mm and leave through the outflow.
+Outputs: `scripts/plot_stream.py ... --scale 1000 --xlim 0 30 --ylim 0 10
+--uin 10`, `snapshots_to_vtk.py`, `paraview_el_movie.py`.

@@ -2,11 +2,12 @@
 !     from C++ (src/elibm.hpp) through the ppiclc_elibm_* bindings.
       real*8 elibm_mu, elibm_rhof, elibm_grav(3), elibm_dtf,
      >       elibm_kn, elibm_erest
-      integer*4 elibm_nbody, elibm_ifnb, elibm_istage, elibm_iattach
+      integer*4 elibm_nbody, elibm_ifnb, elibm_istage, elibm_iattach,
+     >          elibm_iplanar
       common /elibm_par_r/ elibm_mu, elibm_rhof, elibm_grav, elibm_dtf,
      >                     elibm_kn, elibm_erest
       common /elibm_par_i/ elibm_nbody, elibm_ifnb, elibm_istage,
-     >                     elibm_iattach
+     >                     elibm_iattach, elibm_iplanar
 
       integer*4 elibm_nbmax
       parameter (elibm_nbmax = 64)

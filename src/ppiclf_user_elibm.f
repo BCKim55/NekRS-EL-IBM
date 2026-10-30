@@ -32,11 +32,13 @@
       return
       end
 !-----------------------------------------------------------------------
-      subroutine ppiclc_elibm_SetContact(rkn,erest,ifnb,iattach)
+      subroutine ppiclc_elibm_SetContact(rkn,erest,ifnb,iattach,
+     >                                   iplanar)
      > bind(C, name="ppiclc_elibm_SetContact")
 !
 ! ifnb = 1 enables EL-EL contact (needs ppiclc_solve_InitNeighborBin);
-! iattach = 1 makes an EL particle stick to the first IBM body it touches
+! iattach = 1 makes an EL particle stick to the first IBM body it touches;
+! iplanar = 1 freezes the EL motion in z (quasi-2D slab)
 !
       implicit none
 !
@@ -44,12 +46,13 @@
       include "ELIBM.inc"
 !
       real*8 rkn, erest
-      integer*4 ifnb, iattach
+      integer*4 ifnb, iattach, iplanar
 !
       elibm_kn      = rkn
       elibm_erest   = erest
       elibm_ifnb    = ifnb
       elibm_iattach = iattach
+      elibm_iplanar = iplanar
 
       return
       end
@@ -374,6 +377,13 @@
             ! reaction of the drag on the fluid, for the whole parcel
             ppiclf_rprop(PPICLF_R_JFX-1+k,i) = -rnp*fd*ur(k)
          enddo
+         if (elibm_iplanar .eq. 1) then
+            ! planar: no z motion, no z force on the fluid
+            ppiclf_y(PPICLF_JVZ,i)       = 0.0d0
+            ppiclf_ydot(PPICLF_JZ,i)     = 0.0d0
+            ppiclf_ydot(PPICLF_JVZ,i)    = 0.0d0
+            ppiclf_rprop(PPICLF_R_JFZ,i) = 0.0d0
+         endif
  100     continue
       enddo
 

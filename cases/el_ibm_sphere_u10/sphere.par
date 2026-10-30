@@ -1,0 +1,70 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+numSteps = 6000
+# CFL ~ 0.75 at the cylinder (GLL spacing 0.25 mm, u up to ~15 m/s); dt 1e-5
+# (CFL 1.5) drifted up and blew at 4 ms; 30 ms = 10 flow-throughs
+dt = 5e-6
+timeStepper = tombo2
+advectionSubCyclingSteps = 2
+checkpointControl = steps
+checkpointInterval = 500
+
+[MESH]
+# 24 x 8 x 8 elements on [0,30] x [0,10] x [0,10] mm (genbox < sphere.box)
+file = "sphere.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-8
+
+[FLUID VELOCITY]
+# air: inflow u_x = u_in at x = 0, outflow at x = 30 mm, free stream u_in on
+# the y, z faces (outflow there went unstable at the inlet corner edges)
+boundaryTypeMap = udfDirichlet, zeroNeumann
+residualTol = 1e-10
+rho = 1.2
+viscosity = 1.8e-5
+
+[CASEDATA]
+# SI units. Air stream u_in; Re_D = u_in D / nu = 2000
+u_in = 10.0
+# inlet (and injection) velocity ramped linearly from rest over t_ramp (s)
+t_ramp = 2e-3
+# 0: the y, z faces are non-periodic (mesh bc v: free stream), 1: periodic
+periodic_y = 0
+periodic_z = 0
+# IBM sphere D = 3 mm, rho 1374 kg/m3, free to move (body_fixed = 1 holds it);
+# no gravity
+body_radius = 1.5e-3
+body_x = 8e-3
+body_rho = 1374.0
+body_fixed = 0
+# 1: cylinder along z through the slab (el_ibm_cylinder*), 0: sphere (el_ibm_sphere_u10)
+body_cylinder = 0
+# water droplets d_p = D/30 = 100 um, inject_per_step every inject_every
+# steps (33 333 /s, 3 d_p apart along x; inject_every 6 at dt 5e-6) at x = inject_x with the stream
+# velocity, in a disc of radius inject_half_width (< R) about the axis;
+# Stokes number rho_p d_p^2 u_in / (18 mu D) = 103
+dp = 1e-4
+rhop = 1000.0
+inject_x = 2e-3
+inject_half_width = 1.2e-3
+inject_per_step = 1
+inject_every = 6
+# soft-sphere contact (EL-EL and EL-IBM), no adhesion: m_p = 5.2e-10 kg,
+# contact time pi sqrt(m/k_n) = 3e-6 s, resolved by 30 sub-steps per
+# fluid step (1.7e-7 s); impact overlap at 10 m/s u sqrt(m/k_n) ~ 0.1 d_p
+kn = 500.0
+restitution = 0.9
+substeps = 30
+attach = 0
+planar = 0
+# Gaussian FWHM for projection and IBM spreading, IBM marker spacing (~h)
+filter_width = 6e-4
+filter_width_ibm = 0
+marker_spacing = 2.5e-4
+qtl = 1
+report_interval = 20
+snapshot_interval = 10

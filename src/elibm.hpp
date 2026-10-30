@@ -40,7 +40,7 @@
 
 extern "C" {
 void ppiclc_elibm_SetFluid(double *mu, double *rho, double *grav, double *dt);
-void ppiclc_elibm_SetContact(double *kn, double *restitution, int *ifnb, int *iattach);
+void ppiclc_elibm_SetContact(double *kn, double *restitution, int *ifnb, int *iattach, int *iplanar);
 void ppiclc_elibm_SetBodies(int *nb,
                             double *x,
                             double *v,
@@ -102,6 +102,7 @@ struct Config {
   // EL particles stick to the first body they touch (perfectly inelastic),
   // then ride on it, exert no drag and add their mass to the body
   bool attachOnContact = false;
+  bool planar = false; // EL particles keep their z (quasi-2D slab): no z velocity, no z force on the fluid
   int substeps = 1;
   int ioStep = 0; // ppiclF VTU interval in fluid steps (0: none)
   bool twoWay = true; // false: particles feel the fluid, the fluid not the particles
@@ -309,7 +310,8 @@ public:
     double kn = cfg.kn, e = cfg.restitution;
     int ifnb = cfg.neighborWidth > 0 ? 1 : 0;
     int iattach = cfg.attachOnContact ? 1 : 0;
-    ppiclc_elibm_SetContact(&kn, &e, &ifnb, &iattach);
+    int iplanar = cfg.planar ? 1 : 0;
+    ppiclc_elibm_SetContact(&kn, &e, &ifnb, &iattach, &iplanar);
     pushBodies();
     ppiclc_elibm_PlaceMarkers();
 

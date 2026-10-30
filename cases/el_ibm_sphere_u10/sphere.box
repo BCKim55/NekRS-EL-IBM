@@ -1,0 +1,14 @@
+base.rea
+-3                     spatial dimension  ( < 0 --> generate .rea/.re2 pair)
+1                      number of fields
+#=======================================================================
+# 3D box (SI, m): inflow x = 0, outflow at x = 0.03, free stream (u_in
+# Dirichlet) on the y and z faces: zero-pressure outflow there blew up at
+# the inlet corner edges; IBM sphere D = 3 mm at (8, 5, 5) mm
+#=======================================================================
+Box
+-24  -8  -8                                          nelx,nely,nelz
+0 0.03 1.                                            x0,x1,ratio
+0 0.01 1.                                            y0,y1,ratio
+0 0.01 1.                                            z0,z1,ratio
+v  ,O  ,v  ,v  ,v  ,v                                bc's  (3 chars each!)

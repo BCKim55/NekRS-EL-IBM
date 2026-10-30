@@ -29,12 +29,18 @@ viscosity = 1.8e-5
 [CASEDATA]
 # SI units. Air stream u_in; Re_D = u_in D / nu = 100
 u_in = 0.5
+# inlet ramp from rest over t_ramp (0: impulsive start)
+t_ramp = 0
+# 1: y periodic (mesh bc P), 0: outflow on both y faces (el_ibm_cylinder_u10)
+periodic_y = 1
 # IBM cylinder along z (the slab thickness), D = 3 mm, rho 1374 kg/m3, free
 # to move in the plane and spin about z (body_fixed = 1 holds it); no gravity
 body_radius = 1.5e-3
 body_x = 8e-3
 body_rho = 1374.0
 body_fixed = 0
+# 1: cylinder along z through the slab (el_ibm_cylinder*), 0: sphere (el_ibm_sphere_u10)
+body_cylinder = 1
 # water droplets d_p = D/30 = 100 um, inject_per_step every inject_every
 # steps (3333 /s, 1.5 d_p apart along x) at x = inject_x with the stream
 # velocity, mid-plane sheet, |y - y_c| < inject_half_width (< R);
@@ -52,6 +58,9 @@ kn = 1.0
 restitution = 0.9
 substeps = 20
 attach = 0
+# 1: droplets keep z = z_c (no z velocity or z force): EL-EL collisions in the
+# sheet otherwise kick droplets across the thin periodic slab at m/s speeds
+planar = 1
 # Gaussian FWHM for projection and IBM spreading, IBM marker spacing (~h)
 filter_width = 6e-4
 filter_width_ibm = 0

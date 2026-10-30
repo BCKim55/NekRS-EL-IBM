@@ -109,6 +109,11 @@ def main():
     if log:
         ax.plot(log["t"], log["Cd"], "k-", label="body $C_d$ (hydrodynamic force on $u_{in}$, D)")
         ax.set_ylabel("$C_d$")
+        # clip the start-up spike: scale the axis to the second half of the run
+        tail = [c for tt, c in zip(log["t"], log["Cd"]) if tt > 0.5 * log["t"][-1]]
+        if tail:
+            lo, hi = min(tail), max(tail)
+            ax.set_ylim(lo - 0.5 * (hi - lo) - 1e-3, hi + 0.5 * (hi - lo) + 1e-3)
         ax.legend(fontsize=7, loc="upper left")
     ax2 = ax.twinx()
     ax2.plot(t, [f[2]["u"].mean() / a.uin for f in frames], "C3-", alpha=0.7)
