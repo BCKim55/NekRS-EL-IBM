@@ -1,13 +1,16 @@
 !     Parameters and rigid-body state for src/ppiclf_user_elibm.f, set
 !     from C++ (src/elibm.hpp) through the ppiclc_elibm_* bindings.
       real*8 elibm_mu, elibm_rhof, elibm_grav(3), elibm_dtf,
-     >       elibm_kn, elibm_erest
+     >       elibm_kn, elibm_erest,
+     >       elibm_sigma, elibm_theta, elibm_vbfrac
       integer*4 elibm_nbody, elibm_ifnb, elibm_istage, elibm_iattach,
-     >          elibm_iplanar
+     >          elibm_iplanar, elibm_ibridge_el, elibm_ibridge_ibm
       common /elibm_par_r/ elibm_mu, elibm_rhof, elibm_grav, elibm_dtf,
-     >                     elibm_kn, elibm_erest
+     >                     elibm_kn, elibm_erest,
+     >                     elibm_sigma, elibm_theta, elibm_vbfrac
       common /elibm_par_i/ elibm_nbody, elibm_ifnb, elibm_istage,
-     >                     elibm_iattach, elibm_iplanar
+     >                     elibm_iattach, elibm_iplanar,
+     >                     elibm_ibridge_el, elibm_ibridge_ibm
 
       integer*4 elibm_nbmax
       parameter (elibm_nbmax = 64)

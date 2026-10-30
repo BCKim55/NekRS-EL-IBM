@@ -53,6 +53,38 @@
       elibm_ifnb    = ifnb
       elibm_iattach = iattach
       elibm_iplanar = iplanar
+      elibm_sigma      = 0.0d0
+      elibm_theta      = 0.0d0
+      elibm_vbfrac     = 0.0d0
+      elibm_ibridge_el  = 0
+      elibm_ibridge_ibm = 0
+
+      return
+      end
+!-----------------------------------------------------------------------
+      subroutine ppiclc_elibm_SetBridge(sigma,theta,vbfrac,
+     >                                  ibridge_el,ibridge_ibm)
+     > bind(C, name="ppiclc_elibm_SetBridge")
+!
+! Pendular liquid bridge (capillary) force between EL particles
+! (ibridge_el = 1) and between EL particles and IBM bodies
+! (ibridge_ibm = 1): surface tension sigma, contact angle theta (rad),
+! bridge volume vbfrac times the volume of the smaller sphere.
+! Call after SetContact.
+!
+      implicit none
+!
+      include "PPICLF"
+      include "ELIBM.inc"
+!
+      real*8 sigma, theta, vbfrac
+      integer*4 ibridge_el, ibridge_ibm
+!
+      elibm_sigma       = sigma
+      elibm_theta       = theta
+      elibm_vbfrac      = vbfrac
+      elibm_ibridge_el  = ibridge_el
+      elibm_ibridge_ibm = ibridge_ibm
 
       return
       end
@@ -191,9 +223,16 @@
       return
       end
 !-----------------------------------------------------------------------
-      subroutine elibm_ContactForce(xi,vi,ri,rmi,xj,vj,rj,rmj,icyl,f)
+      subroutine elibm_ContactForce(xi,vi,ri,rmi,xj,vj,rj,rmj,icyl,
+     >                              ibr,f)
 !
-! Normal spring-dashpot force on i from j (zero without overlap);
+! Normal force on i from j: spring-dashpot in overlap, plus with
+! ibr = 1 the pendular liquid-bridge attraction (Willett et al. 2000)
+!   F = 2 pi sigma R cos(theta) / (1 + 1.05 S^ + 2.5 S^2),
+!   S^ = S/2 sqrt(R/V), R = 2 ri rj/(ri + rj), S = gap (0 in overlap),
+! V = vbfrac x the smaller sphere's volume, acting up to the rupture
+! gap (1 + theta/2) V^(1/3) (Lian et al. 1993). No pair history: the
+! bridge exists whenever the gap is below the rupture distance.
 ! icyl = 1: j is a cylinder along z, use the in-plane distance.
 !
       implicit none
@@ -202,9 +241,10 @@
       include "ELIBM.inc"
 !
       real*8 xi(3), vi(3), ri, rmi, xj(3), vj(3), rj, rmj, f(3)
-      integer*4 icyl
+      integer*4 icyl, ibr
 !
-      real*8 d(3), dist, delta, rn(3), vn, rmeff, eta, rpi2, rle
+      real*8 d(3), dist, delta, rn(3), vn, rmeff, eta, rpi2, rle,
+     >       rpi, vb, srup, reff, sh, fcap
       integer*4 k
 !
       f(1) = 0.0d0
@@ -218,7 +258,21 @@
       if (icyl .eq. 1) d(3) = 0.0d0
       dist  = sqrt(d(1)**2 + d(2)**2 + d(3)**2)
       delta = ri + rj - dist
-      if (delta .le. 0.0d0 .or. dist .le. 0.0d0) return
+      if (dist .le. 0.0d0) return
+
+      rpi  = 3.141592653589793d0
+      fcap = 0.0d0
+      if (ibr .eq. 1) then
+         vb   = elibm_vbfrac*4.0d0/3.0d0*rpi*min(ri,rj)**3
+         srup = (1.0d0 + 0.5d0*elibm_theta)*vb**(1.0d0/3.0d0)
+         if (-delta .lt. srup) then
+            reff = 2.0d0*ri*rj/(ri + rj)
+            sh   = 0.5d0*max(-delta,0.0d0)*sqrt(reff/vb)
+            fcap = 2.0d0*rpi*elibm_sigma*reff*cos(elibm_theta)
+     >            /(1.0d0 + 1.05d0*sh + 2.5d0*sh**2)
+         endif
+      endif
+      if (delta .le. 0.0d0 .and. fcap .eq. 0.0d0) return
 
       vn = 0.0d0
       do k=1,3
@@ -226,13 +280,18 @@
          vn    = vn + (vi(k) - vj(k))*rn(k)
       enddo
 
+      do k=1,3
+         f(k) = -fcap*rn(k)
+      enddo
+      if (delta .le. 0.0d0) return
+
       rpi2  = 9.869604401089358d0
       rle   = log(elibm_erest)
       rmeff = 1.0d0/(1.0d0/rmi + 1.0d0/rmj)
       eta   = -2.0d0*rle*sqrt(rmeff*elibm_kn)/sqrt(rpi2 + rle**2)
 
       do k=1,3
-         f(k) = (elibm_kn*delta - eta*vn)*rn(k)
+         f(k) = f(k) + (elibm_kn*delta - eta*vn)*rn(k)
       enddo
 
       return
@@ -342,7 +401,7 @@
             call elibm_ContactForce(ppiclf_y(PPICLF_JX,i),
      >         ppiclf_y(PPICLF_JVX,i),0.5d0*dp,rmass,
      >         elibm_bx(1,b),elibm_bv(1,b),elibm_brad(b),
-     >         elibm_bmass(b),elibm_bcyl(b),fb)
+     >         elibm_bmass(b),elibm_bcyl(b),elibm_ibridge_ibm,fb)
             if (elibm_iattach .eq. 1 .and.
      >          (fb(1).ne.0.0d0 .or. fb(2).ne.0.0d0 .or.
      >           fb(3).ne.0.0d0)) then
@@ -516,7 +575,8 @@
      >   call elibm_RigidVel(rpropj,vj)
       call elibm_ContactForce(yi(PPICLF_JX),vi,
      >   0.5d0*rpropi(PPICLF_R_JDP),rmi,
-     >   yj(PPICLF_JX),vj,0.5d0*rpropj(PPICLF_R_JDP),rmj,0,f)
+     >   yj(PPICLF_JX),vj,0.5d0*rpropj(PPICLF_R_JDP),rmj,0,
+     >   elibm_ibridge_el,f)
 
       do k=1,3
          ppiclf_ydotc(PPICLF_JVX-1+k,i) =

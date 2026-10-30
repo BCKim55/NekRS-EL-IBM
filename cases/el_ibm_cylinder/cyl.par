@@ -58,6 +58,15 @@ kn = 1.0
 restitution = 0.9
 substeps = 20
 attach = 0
+# pendular liquid bridge (capillary) attraction between droplets (bridge_el)
+# and droplet-body (bridge_ibm; replaces attach): water sigma 0.072 N/m,
+# contact angle, bridge volume as a fraction of the droplet volume; the
+# bridge breaks at the gap (1 + theta/2) V_b^(1/3) (0.37 d_p here)
+bridge_el = 0
+bridge_ibm = 0
+sigma = 0.072
+contact_angle_deg = 0
+bridge_volume_fraction = 0.1
 # 1: droplets keep z = z_c (no z velocity or z force): EL-EL collisions in the
 # sheet otherwise kick droplets across the thin periodic slab at m/s speeds
 planar = 1

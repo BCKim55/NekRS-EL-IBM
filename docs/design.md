@@ -966,3 +966,62 @@ rest. 70 % of the droplets in the box stay inside the injection disc; the
 collided ones are scattered to r up to 4.7 mm and leave through the outflow.
 Outputs: `scripts/plot_stream.py ... --scale 1000 --xlim 0 30 --ylim 0 10
 --uin 10`, `snapshots_to_vtk.py`, `paraview_el_movie.py`.
+
+### 7.9 Liquid bridge (capillary) force (`cases/el_ibm_bridge`)
+
+A pendular liquid bridge between two wetted spheres pulls them together
+until it ruptures. `elibm_ContactForce` adds, for pairs with the bridge
+switched on, the Willett et al. (2000) closed form
+
+    F = 2π σ R cos θ / (1 + 1.05 Ŝ + 2.5 Ŝ²),   Ŝ = (S/2) √(R/V_b),
+    R = 2 r_i r_j / (r_i + r_j),   S = gap (0 while overlapping),
+
+acting along the centre line up to the rupture gap
+S_rup = (1 + θ/2) V_b^(1/3) (Lian et al. 1993) and zero beyond it. V_b is
+`bridgeVolumeFraction` times the smaller sphere's volume (so a droplet-body
+bridge holds a fraction of the droplet). In overlap the spring-dashpot adds
+to F(0), so a bridged droplet rests slightly pressed into its partner
+(δ = F(0)/k_n). The force is the same routine for EL-EL pairs
+(`Config::bridgeEl`, through `EvalNearestNeighbor`) and EL-body pairs
+(`Config::bridgeIbm`, the body loop in `SetYdot`); the reaction on a body
+goes through the existing impulse channel, so a droplet that the bridge
+holds back also pulls the body. `bridgeIbm` replaces `attachOnContact` (the
+two are refused together). `ppiclc_elibm_SetBridge` carries σ, θ, V_b/V_p
+and the two switches; the EL-EL search radius must be d_p + S_rup
+(`Config::bridgeRupture`), which the udf sets.
+
+Limits of this stage: no pair history (a bridge exists whenever the gap is
+below S_rup, so two approaching droplets attract before they touch and
+cohesion is somewhat overestimated), no viscous (lubrication) term, no
+liquid transfer between partners, and no tangential or rolling resistance.
+Pair memory would need per-particle partner ids in `rprop`.
+
+Scale for 100 µm water (σ 0.072, θ 0, V_b/V_p 0.1): F(0) 23 µN between
+droplets and 44 µN droplet-body (4400 x the droplet weight), S_rup 0.37 d_p.
+Such forces need k_n well above the 1 N/m of `el_ibm_cylinder` (the pull
+would sink a droplet 0.44 d_p into the body); the case uses 50 N/m with 40
+sub-steps (contact time 1e-5 s, 4 sub-steps per contact; 200 sub-steps at
+k_n 500 cost 2 s/step).
+
+Case: `el_ibm_cylinder` (0.5 m/s air, free cylinder, 3333 droplets/s, 0.3 s)
+with both bridges on, and the same k_n / sub-steps without the bridge for
+the comparison (`build/el_ibm_bridge_run.sh <name> <0|1>`,
+`scripts/compare_bridge.py`).
+
+Result (0.3 s, 4 ranks, 0.6 s/step): without the bridge 563 of the 1000
+droplets collide and 769 leave (231 in the slab); with it none leaves. The
+capillary force (23-44 µN) is 3000 x the drag on a droplet (3πμ d_p u_in =
+8.5e-9 N), so every droplet that reaches the cylinder sticks, every droplet
+that reaches a stuck one sticks to it, and the whole stream builds a
+close-packed crust on the upstream half of the cylinder (97 in direct
+contact with the body, the rest bridged droplet-to-droplet, hexagonal
+packing at 1.01 d_p spacing). The crust slows the air in front, so the
+hydrodynamic C_d on the cylinder drops from 2.2 to 1.6-2.0 (the crust
+itself is not a solid to the flow), and the cylinder ends 17 % faster
+(0.048 against 0.041 m/s) because the captured droplets give it their whole
+momentum instead of the 1 - e fraction of a bounce. CFL rose to 0.93 where
+the crust displaces the air (qtl). This is the expected regime for
+capillary / drag ratio >> 1 (agglomeration); the model earns its keep where
+the bridge is weak against the other forces (Pilobolus: sap bridges against
+1e3 m/s² decelerations), or with a smaller V_b, larger θ, or a pair history
+that lets a bridge form only on contact.

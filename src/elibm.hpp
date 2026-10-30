@@ -41,6 +41,7 @@
 extern "C" {
 void ppiclc_elibm_SetFluid(double *mu, double *rho, double *grav, double *dt);
 void ppiclc_elibm_SetContact(double *kn, double *restitution, int *ifnb, int *iattach, int *iplanar);
+void ppiclc_elibm_SetBridge(double *sigma, double *theta, double *vbfrac, int *ibridgeEl, int *ibridgeIbm);
 void ppiclc_elibm_SetBodies(int *nb,
                             double *x,
                             double *v,
@@ -103,6 +104,17 @@ struct Config {
   // then ride on it, exert no drag and add their mass to the body
   bool attachOnContact = false;
   bool planar = false; // EL particles keep their z (quasi-2D slab): no z velocity, no z force on the fluid
+  // pendular liquid-bridge attraction (Willett et al. 2000) between EL
+  // particles (bridgeEl) and EL particles and bodies (bridgeIbm): surface
+  // tension sigma, contact angle (rad), bridge volume as a fraction of the
+  // smaller sphere's volume; the bridge breaks at the rupture gap
+  // (1 + theta/2) V^(1/3). Exclusive with attachOnContact on the body side.
+  bool bridgeEl = false, bridgeIbm = false;
+  double sigma = 0, contactAngle = 0, bridgeVolumeFraction = 0.1;
+  double bridgeRupture(double dp) const // rupture gap of a bridge between spheres of diameter dp
+  {
+    return (1 + 0.5 * contactAngle) * std::cbrt(bridgeVolumeFraction * M_PI / 6 * dp * dp * dp);
+  }
   int substeps = 1;
   int ioStep = 0; // ppiclF VTU interval in fluid steps (0: none)
   bool twoWay = true; // false: particles feel the fluid, the fluid not the particles
@@ -312,6 +324,17 @@ public:
     int iattach = cfg.attachOnContact ? 1 : 0;
     int iplanar = cfg.planar ? 1 : 0;
     ppiclc_elibm_SetContact(&kn, &e, &ifnb, &iattach, &iplanar);
+    if (cfg.bridgeEl || cfg.bridgeIbm) {
+      if (cfg.bridgeIbm && cfg.attachOnContact) {
+        throw std::runtime_error("elibm: bridgeIbm replaces attachOnContact; set one of them");
+      }
+      if (cfg.bridgeEl && !ifnb) {
+        throw std::runtime_error("elibm: bridgeEl needs neighborWidth >= dp + bridgeRupture(dp)");
+      }
+      double sigma = cfg.sigma, theta = cfg.contactAngle, vb = cfg.bridgeVolumeFraction;
+      int iel = cfg.bridgeEl ? 1 : 0, iibm = cfg.bridgeIbm ? 1 : 0;
+      ppiclc_elibm_SetBridge(&sigma, &theta, &vb, &iel, &iibm);
+    }
     pushBodies();
     ppiclc_elibm_PlaceMarkers();
 

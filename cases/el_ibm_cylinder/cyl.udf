@@ -29,6 +29,8 @@
 
 static double rhof = 1, tRamp = 0, uIn, bodyRadius, bodyX, bodyRho, dp, rhop, injX, injHalfWidth, kn, restitution;
 static double filterWidth, filterWidthIbm = 0, markerSpacing;
+static double sigma = 0.072, contactAngleDeg = 0, bridgeVolumeFraction = 0.1;
+static int bridgeEl = 0, bridgeIbm = 0;
 static int periodicY = 1, periodicZ = 1, bodyCylinder = 1, planar = 0, bodyFixed, injectPerStep, injectEvery = 1, substeps, attach, qtl, reportInterval, snapshotInterval;
 
 static std::unique_ptr<elibm::Coupling> coupling;
@@ -89,6 +91,11 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
   get("restitution", restitution);
   get("substeps", substeps);
   get("attach", attach);
+  get("bridge_el", bridgeEl);
+  get("bridge_ibm", bridgeIbm);
+  get("sigma", sigma);
+  get("contact_angle_deg", contactAngleDeg);
+  get("bridge_volume_fraction", bridgeVolumeFraction);
   get("filter_width", filterWidth);
   get("filter_width_ibm", filterWidthIbm);
   get("marker_spacing", markerSpacing);
@@ -116,11 +123,17 @@ void UDF_Setup()
   cfg.markerSpacing = markerSpacing;
   cfg.kn = kn;
   cfg.restitution = restitution;
-  cfg.neighborWidth = dp;
   cfg.substeps = substeps;
   cfg.qtl = qtl != 0;
   cfg.attachOnContact = attach != 0;
   cfg.planar = planar != 0;
+  cfg.bridgeEl = bridgeEl != 0;
+  cfg.bridgeIbm = bridgeIbm != 0;
+  cfg.sigma = sigma;
+  cfg.contactAngle = contactAngleDeg * M_PI / 180;
+  cfg.bridgeVolumeFraction = bridgeVolumeFraction;
+  // EL-EL search radius: contact, plus the bridge reach
+  cfg.neighborWidth = dp + (bridgeEl ? cfg.bridgeRupture(dp) : 0);
 
   coupling = std::make_unique<elibm::Coupling>(nrs, cfg);
   const auto lo = coupling->domainLo();
@@ -144,6 +157,15 @@ void UDF_Setup()
            cfg.rhof * uIn * D / cfg.mu, rhop * dp * dp * uIn / (18 * cfg.mu * D), dp / D, tot.nMarker,
            injectPerStep, bodyCylinder ? "cylinder" : "sphere", bodyRho * coupling->bodies()[0].volume(),
            rhop * M_PI / 6 * dp * dp * dp);
+    if (bridgeEl || bridgeIbm) {
+      // peak bridge force (gap 0) on a droplet from another droplet / from the body
+      const double r = 0.5 * dp, Rb = bodyRadius, c = std::cos(cfg.contactAngle);
+      printf("stream: liquid bridge EL %d IBM %d  sigma %.3e  theta %.0f deg  V_b/V_p %.2f  rupture gap %.3e "
+             "(%.2f dp)  F_max EL-EL %.3e N  EL-IBM %.3e N  (droplet weight %.3e N)\n",
+             bridgeEl, bridgeIbm, sigma, contactAngleDeg, bridgeVolumeFraction, cfg.bridgeRupture(dp),
+             cfg.bridgeRupture(dp) / dp, 2 * M_PI * sigma * r * c, 2 * M_PI * sigma * (2 * r * Rb / (r + Rb)) * c,
+             rhop * M_PI / 6 * dp * dp * dp * 9.81);
+    }
   }
 }
 

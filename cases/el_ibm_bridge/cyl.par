@@ -1,0 +1,82 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = numSteps
+numSteps = 3000
+# CFL ~ 0.6 at the cylinder (GLL spacing 0.25 mm); 0.3 s
+dt = 1e-4
+timeStepper = tombo2
+advectionSubCyclingSteps = 2
+checkpointControl = steps
+checkpointInterval = 250
+
+[MESH]
+# 24 x 8 x 1 elements on [0,30] x [0,10] x [0,2] mm (genbox < cyl.box); the
+# slab must be thicker than the ppiclF ghost cutoff (~ filter_width)
+file = "cyl.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-8
+
+[FLUID VELOCITY]
+# air: inflow u_x = u_in at x = 0, outflow at x = 30 mm; y, z periodic
+boundaryTypeMap = udfDirichlet, zeroNeumann
+residualTol = 1e-10
+rho = 1.2
+viscosity = 1.8e-5
+
+[CASEDATA]
+# SI units. Air stream u_in; Re_D = u_in D / nu = 100
+u_in = 0.5
+# inlet ramp from rest over t_ramp (0: impulsive start)
+t_ramp = 0
+# 1: y periodic (mesh bc P), 0: outflow on both y faces (el_ibm_cylinder_u10)
+periodic_y = 1
+# IBM cylinder along z (the slab thickness), D = 3 mm, rho 1374 kg/m3, free
+# to move in the plane and spin about z (body_fixed = 1 holds it); no gravity
+body_radius = 1.5e-3
+body_x = 8e-3
+body_rho = 1374.0
+body_fixed = 0
+# 1: cylinder along z through the slab (el_ibm_cylinder*), 0: sphere (el_ibm_sphere_u10)
+body_cylinder = 1
+# water droplets d_p = D/30 = 100 um, inject_per_step every inject_every
+# steps (3333 /s, 1.5 d_p apart along x) at x = inject_x with the stream
+# velocity, mid-plane sheet, |y - y_c| < inject_half_width (< R);
+# Stokes number rho_p d_p^2 u_in / (18 mu D) = 5.1
+dp = 1e-4
+rhop = 1000.0
+inject_x = 2e-3
+inject_half_width = 1.2e-3
+inject_per_step = 1
+inject_every = 3
+# el_ibm_cylinder with the liquid bridge on (bridge = 0 runs the same
+# parameters without it, for the comparison). k_n is raised to 50 N/m so
+# the bridge pull (4.4e-5 N on the cylinder, 2.3e-5 N droplet-droplet)
+# sinks a droplet only 0.01 d_p into the body (k_n 1 would give 0.44 d_p);
+# contact time pi sqrt(m/k_n) = 1e-5 s, resolved by 40 sub-steps per
+# fluid step (2.5e-6 s)
+kn = 50.0
+restitution = 0.9
+substeps = 40
+attach = 0
+# pendular liquid bridge (capillary) attraction between droplets (bridge_el)
+# and droplet-body (bridge_ibm; replaces attach): water sigma 0.072 N/m,
+# contact angle, bridge volume as a fraction of the droplet volume; the
+# bridge breaks at the gap (1 + theta/2) V_b^(1/3) (0.37 d_p here)
+bridge_el = 1
+bridge_ibm = 1
+sigma = 0.072
+contact_angle_deg = 0
+bridge_volume_fraction = 0.1
+# 1: droplets keep z = z_c (no z velocity or z force): EL-EL collisions in the
+# sheet otherwise kick droplets across the thin periodic slab at m/s speeds
+planar = 1
+# Gaussian FWHM for projection and IBM spreading, IBM marker spacing (~h)
+filter_width = 6e-4
+filter_width_ibm = 0
+marker_spacing = 2.5e-4
+qtl = 1
+report_interval = 20
+snapshot_interval = 10
