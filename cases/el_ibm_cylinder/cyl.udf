@@ -31,7 +31,7 @@ static double rhof = 1, tRamp = 0, uIn, bodyRadius, bodyX, bodyRho, dp, rhop, in
 static double filterWidth, filterWidthIbm = 0, markerSpacing;
 static double sigma = 0.072, contactAngleDeg = 0, bridgeVolumeFraction = 0.1;
 static int bridgeEl = 0, bridgeIbm = 0;
-static int periodicY = 1, periodicZ = 1, bodyCylinder = 1, planar = 0, bodyFixed, injectPerStep, injectEvery = 1, substeps, attach, qtl, reportInterval, snapshotInterval;
+static int periodicY = 1, periodicZ = 1, bodyCylinder = 1, bodyHemisphere = 0, planar = 0, bodyFixed, injectPerStep, injectEvery = 1, substeps, attach, qtl, reportInterval, snapshotInterval;
 
 static std::unique_ptr<elibm::Coupling> coupling;
 static long long injected = 0;
@@ -76,6 +76,7 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
   get("periodic_y", periodicY);
   get("periodic_z", periodicZ);
   get("body_cylinder", bodyCylinder);
+  get("body_hemisphere", bodyHemisphere);
   get("planar", planar);
   get("body_radius", bodyRadius);
   get("body_x", bodyX);
@@ -144,6 +145,10 @@ void UDF_Setup()
   elibm::Body body;
   body.radius = bodyRadius;
   body.length = bodyCylinder ? hi[2] - lo[2] : 0; // cylinder through the periodic slab, or a sphere
+  body.hemisphere = bodyHemisphere != 0 && !bodyCylinder;
+  if (body.hemisphere) {
+    body.setAxis({1, 0, 0}); // dome downstream (+x), flat face towards the inlet and the droplets (a cylinder keeps z)
+  }
   body.rho = bodyRho;
   body.fixed = bodyFixed != 0;
   body.x = {bodyX, yc, zc};
@@ -155,7 +160,7 @@ void UDF_Setup()
     printf("stream: Re_D %.1f  St %.2f  dp/D %.4f  markers %lld  %d particle(s) per step  %s mass %.3e kg  "
            "droplet mass %.3e kg\n",
            cfg.rhof * uIn * D / cfg.mu, rhop * dp * dp * uIn / (18 * cfg.mu * D), dp / D, tot.nMarker,
-           injectPerStep, bodyCylinder ? "cylinder" : "sphere", bodyRho * coupling->bodies()[0].volume(),
+           injectPerStep, bodyCylinder ? "cylinder" : bodyHemisphere ? "hemisphere" : "sphere", bodyRho * coupling->bodies()[0].volume(),
            rhop * M_PI / 6 * dp * dp * dp);
     if (bridgeEl || bridgeIbm) {
       // peak bridge force (gap 0) on a droplet from another droplet / from the body

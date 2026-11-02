@@ -34,6 +34,8 @@ viscosity = 1.8e-5
 # then decelerating at `decel` (measured ~1300 m/s2; an equivalent sphere's
 # drag gives ~150-200). Re = v d / nu = 200.
 diameter = 3.5e-4
+# 1: solid hemisphere of the same volume (R = 0.22 mm), dome forward, flat face towards the nozzle
+hemisphere = 0
 body_rho = 1150.0
 v_max = 8.6
 t_rise = 2.2e-4

@@ -90,12 +90,12 @@
       end
 !-----------------------------------------------------------------------
       subroutine ppiclc_elibm_SetBodies(nb,bx,bv,bw,brot,brad,bmass,
-     >                                  bcyl)
+     >                                  bshape)
      > bind(C, name="ppiclc_elibm_SetBodies")
 !
 ! Rigid-body state, one entry per body: centre, velocity, angular
 ! velocity, rotation matrix (body -> lab, column-major), radius, mass,
-! 1 for a cylinder along z (contact on the in-plane distance).
+! shape (0 sphere, 1 cylinder along z, 2 hemisphere).
 !
       implicit none
 !
@@ -104,7 +104,7 @@
 !
       integer*4 nb
       real*8 bx(3,*), bv(3,*), bw(3,*), brot(3,3,*), brad(*), bmass(*)
-      integer*4 bcyl(*)
+      integer*4 bshape(*)
 !
       integer*4 b, i, j
 !
@@ -123,7 +123,7 @@
          enddo
          elibm_brad(b)  = brad(b)
          elibm_bmass(b) = bmass(b)
-         elibm_bcyl(b)  = bcyl(b)
+         elibm_bshape(b) = bshape(b)
       enddo
 
       return
@@ -223,17 +223,20 @@
       return
       end
 !-----------------------------------------------------------------------
-      subroutine elibm_ContactForce(xi,vi,ri,rmi,xj,vj,rj,rmj,icyl,
+      subroutine elibm_ContactForce(xi,vi,ri,rmi,xj,vj,rj,rmj,ib,
      >                              ibr,f)
 !
-! Normal force on i from j: spring-dashpot in overlap, plus with
-! ibr = 1 the pendular liquid-bridge attraction (Willett et al. 2000)
+! Normal force on sphere i (centre xi, radius ri) from j: spring-dashpot
+! in overlap, plus with ibr = 1 the pendular liquid-bridge attraction
+! (Willett et al. 2000)
 !   F = 2 pi sigma R cos(theta) / (1 + 1.05 S^ + 2.5 S^2),
 !   S^ = S/2 sqrt(R/V), R = 2 ri rj/(ri + rj), S = gap (0 in overlap),
 ! V = vbfrac x the smaller sphere's volume, acting up to the rupture
 ! gap (1 + theta/2) V^(1/3) (Lian et al. 1993). No pair history: the
 ! bridge exists whenever the gap is below the rupture distance.
-! icyl = 1: j is a cylinder along z, use the in-plane distance.
+! ib = 0: j is another sphere of radius rj; ib > 0: j is body ib (xj its
+! centre of mass), and the gap and normal follow its shape through
+! elibm_SurfaceGap.
 !
       implicit none
 !
@@ -241,9 +244,9 @@
       include "ELIBM.inc"
 !
       real*8 xi(3), vi(3), ri, rmi, xj(3), vj(3), rj, rmj, f(3)
-      integer*4 icyl, ibr
+      integer*4 ib, ibr
 !
-      real*8 d(3), dist, delta, rn(3), vn, rmeff, eta, rpi2, rle,
+      real*8 d(3), gsurf, delta, rn(3), vn, rmeff, eta, rpi2, rle,
      >       rpi, vb, srup, reff, sh, fcap
       integer*4 k
 !
@@ -255,10 +258,9 @@
          d(k) = xi(k) - xj(k)
       enddo
       call elibm_MinImage(d)
-      if (icyl .eq. 1) d(3) = 0.0d0
-      dist  = sqrt(d(1)**2 + d(2)**2 + d(3)**2)
-      delta = ri + rj - dist
-      if (dist .le. 0.0d0) return
+      call elibm_SurfaceGap(d,rj,ib,gsurf,rn)
+      if (gsurf .ge. 1.0d30) return
+      delta = ri - gsurf
 
       rpi  = 3.141592653589793d0
       fcap = 0.0d0
@@ -276,8 +278,7 @@
 
       vn = 0.0d0
       do k=1,3
-         rn(k) = d(k)/dist
-         vn    = vn + (vi(k) - vj(k))*rn(k)
+         vn = vn + (vi(k) - vj(k))*rn(k)
       enddo
 
       do k=1,3
@@ -292,6 +293,86 @@
 
       do k=1,3
          f(k) = f(k) + (elibm_kn*delta - eta*vn)*rn(k)
+      enddo
+
+      return
+      end
+!-----------------------------------------------------------------------
+      subroutine elibm_SurfaceGap(d,rj,ib,gsurf,rn)
+!
+! Signed distance gsurf from a point at d (relative to the centre of
+! mass of body ib, or to the centre of a sphere of radius rj if ib = 0)
+! to the body surface, positive outside, and the outward unit normal rn
+! there (lab frame). gsurf = 1e30 when the point is at the centre.
+! Shapes: sphere; cylinder along z (in-plane distance); hemisphere of
+! radius rj with its dome on body +z and the sphere centre 3/8 rj behind
+! the centre of mass: the dome, the flat face or its rim, whichever is
+! nearest.
+!
+      implicit none
+!
+      include "PPICLF"
+      include "ELIBM.inc"
+!
+      real*8 d(3), rj, gsurf, rn(3)
+      integer*4 ib
+!
+      real*8 q(3), p(3), dist, rho, nb(3)
+      integer*4 k, j, ishape
+!
+      ishape = 0
+      if (ib .gt. 0) ishape = elibm_bshape(ib)
+      gsurf = 1.0d30
+
+      if (ishape .ne. 2) then
+         do k=1,3
+            q(k) = d(k)
+         enddo
+         if (ishape .eq. 1) q(3) = 0.0d0
+         dist = sqrt(q(1)**2 + q(2)**2 + q(3)**2)
+         if (dist .le. 0.0d0) return
+         gsurf = dist - rj
+         do k=1,3
+            rn(k) = q(k)/dist
+         enddo
+         return
+      endif
+
+      ! hemisphere: to the body frame, relative to the sphere centre
+      do k=1,3
+         p(k) = 0.0d0
+         do j=1,3
+            p(k) = p(k) + elibm_brot(j,k,ib)*d(j)
+         enddo
+      enddo
+      p(3) = p(3) + 0.375d0*rj
+      if (p(3) .ge. 0.0d0) then
+         ! dome side: the spherical surface
+         dist = sqrt(p(1)**2 + p(2)**2 + p(3)**2)
+         if (dist .le. 0.0d0) return
+         gsurf = dist - rj
+         do k=1,3
+            nb(k) = p(k)/dist
+         enddo
+      else
+         rho = sqrt(p(1)**2 + p(2)**2)
+         if (rho .le. rj) then
+            ! behind the flat face
+            gsurf = -p(3)
+            nb(1) = 0.0d0
+            nb(2) = 0.0d0
+            nb(3) = -1.0d0
+         else
+            ! outside the rim: nearest point is the rim circle
+            gsurf = sqrt((rho - rj)**2 + p(3)**2)
+            nb(1) = (rho - rj)*p(1)/rho/gsurf
+            nb(2) = (rho - rj)*p(2)/rho/gsurf
+            nb(3) = p(3)/gsurf
+         endif
+      endif
+      do k=1,3
+         rn(k) = elibm_brot(k,1,ib)*nb(1) + elibm_brot(k,2,ib)*nb(2)
+     >         + elibm_brot(k,3,ib)*nb(3)
       enddo
 
       return
@@ -401,7 +482,7 @@
             call elibm_ContactForce(ppiclf_y(PPICLF_JX,i),
      >         ppiclf_y(PPICLF_JVX,i),0.5d0*dp,rmass,
      >         elibm_bx(1,b),elibm_bv(1,b),elibm_brad(b),
-     >         elibm_bmass(b),elibm_bcyl(b),elibm_ibridge_ibm,fb)
+     >         elibm_bmass(b),b,elibm_ibridge_ibm,fb)
             if (elibm_iattach .eq. 1 .and.
      >          (fb(1).ne.0.0d0 .or. fb(2).ne.0.0d0 .or.
      >           fb(3).ne.0.0d0)) then

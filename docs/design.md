@@ -1025,3 +1025,46 @@ capillary / drag ratio >> 1 (agglomeration); the model earns its keep where
 the bridge is weak against the other forces (Pilobolus: sap bridges against
 1e3 m/s² decelerations), or with a smaller V_b, larger θ, or a pair history
 that lets a bridge form only on contact.
+
+### 7.10 Hemisphere bodies
+
+`Body::hemisphere` makes a body a solid hemisphere of `radius`: dome on the
+body +z side, flat face at z = -3R/8, with `Body::x` the centre of mass
+(the sphere centre is 3R/8 behind it on the axis). `Body::setAxis(dir)`
+orients the axis in the lab; `Body::axis()` returns it. Volume 2/3 πR³.
+
+- **Markers.** The upper half of a sphere's Fibonacci set (share 2πR²/n_d
+  each) plus staggered rings on the flat face (share πR²/n_f), both relative
+  to the centre of mass; the marker count follows `markerSpacing` as for the
+  sphere. The fluid side is unchanged (direct forcing per marker).
+- **Contact and bridge.** `elibm_SurfaceGap` returns the signed distance
+  from a droplet centre to the surface and the outward normal: on the dome
+  side the sphere formula, behind the flat face the plane, outside the rim
+  the rim circle (continuous across the three regions). `elibm_ContactForce`
+  now takes the body index (0 for an EL-EL pair) and gets the gap and normal
+  from it, so the sphere and cylinder paths are the old ones.
+- **Rotation.** The contact impulse on a body now carries its moment about
+  the centre of mass (`impulseTorque`, buffer slots 10-12; zero for a sphere
+  since the normal passes through the centre). A hemisphere integrates
+  Euler's equations in the body frame with I = diag(83/320, 83/320, 2/5) m R²
+  (about the centre of mass), then the Rodrigues update of `rot`; spheres
+  and cylinders keep the scalar inertia.
+- **Output.** `body.csv` gained `shape, ax, ay, az`; `snapshots_to_vtk.py
+  --body-surface` meshes the hemisphere along the axis, and the ParaView
+  movie uses `body_surf.pvd` when it exists. `scripts/check_hemisphere.py`
+  checks that no droplet centre ends up inside the body and prints the axis
+  history.
+
+Cases: `body_hemisphere = 1` in the stream cases (dome downstream, flat face
+towards the inlet and the droplets) and `hemisphere = 1` in
+`pilobolus_launch` (same volume as the d = 0.35 mm sphere, R = 0.22 mm, dome
+forward, flat face towards the nozzle and the sap).
+
+Check (`build/el_ibm_hemi_smoke`, `el_ibm_sphere_u10` with `body_hemisphere
+= 1`, 600 steps = 3 ms): 339 markers, stable (CFL 0.51), 100 droplets
+injected, 41 hit the flat face and 66 were sent back; the deepest droplet
+overlap is 5.6 µm = 0.06 d_p (the 10 m/s impact overlap u √(m/k_n) =
+0.1 d_p), no droplet centre inside the body; off-axis hits spin the body to
+|ω| ≈ 1-2 rad/s while the axis stays within 0.002 rad of x over 3 ms.
+Regression: the cylinder case (`el_ibm_bridge` without the bridge, 200
+steps with contacts) reproduces the previous log to roundoff.

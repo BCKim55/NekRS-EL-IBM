@@ -49,7 +49,7 @@ void ppiclc_elibm_SetBodies(int *nb,
                             double *rot,
                             double *radius,
                             double *mass,
-                            int *cylinder);
+                            int *shape);
 void ppiclc_elibm_PlaceMarkers();
 void ppiclc_elibm_BeginStep();
 void ppiclc_solve_InitParticleFilter(int *jfilt); // ppiclF patch 0006
@@ -68,6 +68,26 @@ struct Body {
   // contact on the in-plane distance, motion in x, y and spin about z only
   double length = 0;
   bool cylinder() const { return length > 0; }
+  // a solid hemisphere of this radius: dome on the body +z side, flat face
+  // at z = -3R/8 (x is the centre of mass; the sphere centre sits 3R/8
+  // behind it on the axis); full rigid-body rotation with the tensor
+  // I_zz = 2/5 m R^2, I_xx = I_yy = 83/320 m R^2
+  bool hemisphere = false;
+  int shape() const { return cylinder() ? 1 : hemisphere ? 2 : 0; } // as passed to Fortran
+  static constexpr double kHemiOffset = 3.0 / 8.0; // sphere centre to centre of mass, in radii
+  // orient the body axis (body z) along dir in the lab
+  void setAxis(vec3 dir)
+  {
+    const double n = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+    const vec3 z = {dir[0] / n, dir[1] / n, dir[2] / n};
+    const vec3 seed = std::abs(z[0]) < 0.9 ? vec3{1, 0, 0} : vec3{0, 1, 0};
+    vec3 x = {seed[1] * z[2] - seed[2] * z[1], seed[2] * z[0] - seed[0] * z[2], seed[0] * z[1] - seed[1] * z[0]};
+    const double nx = std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+    x = {x[0] / nx, x[1] / nx, x[2] / nx};
+    const vec3 y = {z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]};
+    rot = {x[0], x[1], x[2], y[0], y[1], y[2], z[0], z[1], z[2]}; // columns: body axes in the lab
+  }
+  vec3 axis() const { return {rot[6], rot[7], rot[8]}; }
   bool fixed = false; // held in place: markers still force the fluid, the body does not move
   // driven: the UDF sets x, v (and w) for the new time before step(); the
   // markers enforce that motion and hydroForceOnBodies() still reports the
@@ -78,7 +98,10 @@ struct Body {
   vec3 v{};
   vec3 w{};
   std::array<double, 9> rot{1, 0, 0, 0, 1, 0, 0, 0, 1}; // body -> lab, column-major
-  double volume() const { return cylinder() ? M_PI * radius * radius * length : 4.0 / 3.0 * M_PI * radius * radius * radius; }
+  double volume() const
+  {
+    return cylinder() ? M_PI * radius * radius * length : (hemisphere ? 2.0 / 3.0 : 4.0 / 3.0) * M_PI * radius * radius * radius;
+  }
 };
 
 struct ElParticle {
@@ -247,13 +270,33 @@ public:
     if (platform->comm.mpiRank() == 0) {
       for (size_t b = 0; b < bodyList.size(); b++) {
         const auto &body = bodyList[b];
-        const bool cyl = body.cylinder();
-        const double area = cyl ? 2 * M_PI * body.radius * body.length : 4 * M_PI * body.radius * body.radius;
+        const bool cyl = body.cylinder(), hemi = body.hemisphere;
+        const double R = body.radius, ds = cfg.markerSpacing;
+        const double area = cyl ? 2 * M_PI * R * body.length : (hemi ? 3 : 4) * M_PI * R * R;
         // cylinder: nz rings of nt markers on the lateral surface (no end caps: the slab is periodic)
-        const int nt = std::max(12, static_cast<int>(std::lround(2 * M_PI * body.radius / cfg.markerSpacing)));
-        const int nz = std::max(1, static_cast<int>(std::lround(body.length / cfg.markerSpacing)));
-        const int nm = cyl ? nt * nz : std::max(12, static_cast<int>(std::lround(area / (cfg.markerSpacing * cfg.markerSpacing))));
+        const int nt = std::max(12, static_cast<int>(std::lround(2 * M_PI * R / ds)));
+        const int nz = std::max(1, static_cast<int>(std::lround(body.length / ds)));
+        // sphere: Fibonacci points; hemisphere: the upper half of a sphere's
+        // Fibonacci points (nd) plus rings on the flat face (nf), each set with
+        // its own area share
+        const int nsph = std::max(12, static_cast<int>(std::lround(4 * M_PI * R * R / (ds * ds))));
+        const int nd = hemi ? (nsph + 1) / 2 : nsph;
+        const int nr = std::max(1, static_cast<int>(std::lround(R / ds)));
+        std::vector<vec3> flat; // flat-face markers, body frame (relative to the sphere centre)
+        if (hemi) {
+          for (int k = 0; k < nr; k++) {
+            const double rk = (k + 0.5) * R / nr;
+            const int nk = std::max(1, static_cast<int>(std::lround(2 * M_PI * rk / ds)));
+            for (int j = 0; j < nk; j++) {
+              const double th = 2 * M_PI * (j + 0.5 * (k % 2)) / nk;
+              flat.push_back({rk * std::cos(th), rk * std::sin(th), 0.0});
+            }
+          }
+        }
+        const int nf = flat.size();
+        const int nm = cyl ? nt * nz : nd + nf;
         const double golden = M_PI * (3.0 - std::sqrt(5.0));
+        const vec3 com = {0, 0, hemi ? -Body::kHemiOffset * R : 0}; // centre of mass from the sphere centre
         // Marker volume = surface share x the Gaussian's normal thickness
         // sqrt(2 pi) sigma: a Gaussian sheet of that thickness integrates to
         // one across the surface, so spreading then interpolating returns
@@ -263,17 +306,22 @@ public:
         const double thickness = std::sqrt(2 * M_PI) * sigma;
         for (int m = 0; m < nm; m++) {
           vec3 ref;
+          double share = area / nm;
           if (cyl) {
             const double th = 2 * M_PI * (m % nt + 0.5 * ((m / nt) % 2)) / nt; // rings staggered by half a spacing
-            ref = {body.radius * std::cos(th), body.radius * std::sin(th), (m / nt + 0.5) * body.length / nz - 0.5 * body.length};
-          } else {
-            const double zr = 1.0 - (m + 0.5) * 2.0 / nm;
+            ref = {R * std::cos(th), R * std::sin(th), (m / nt + 0.5) * body.length / nz - 0.5 * body.length};
+          } else if (m < nd) {
+            const double zr = 1.0 - (m + 0.5) * 2.0 / nsph; // hemisphere: m < nd keeps zr > 0
             const double rr = std::sqrt(1.0 - zr * zr);
-            ref = {body.radius * rr * std::cos(m * golden), body.radius * rr * std::sin(m * golden), body.radius * zr};
+            ref = {R * rr * std::cos(m * golden) - com[0], R * rr * std::sin(m * golden) - com[1], R * zr - com[2]};
+            share = hemi ? 2 * M_PI * R * R / nd : area / nm;
+          } else {
+            ref = {flat[m - nd][0] - com[0], flat[m - nd][1] - com[1], flat[m - nd][2] - com[2]};
+            share = M_PI * R * R / nf;
           }
           std::array<double, PPICLF_LRP> r{};
           r[PPICLF_R_JTYPE - 1] = PPICLF_TYPE_MARKER;
-          r[PPICLF_R_JVOLP - 1] = area / nm * thickness;
+          r[PPICLF_R_JVOLP - 1] = share * thickness;
           r[PPICLF_R_JID - 1] = b;
           r[PPICLF_R_JRX - 1] = ref[0];
           r[PPICLF_R_JRY - 1] = ref[1];
@@ -414,7 +462,7 @@ public:
 
     // contact impulse each EL particle received from the bodies over the
     // step (RK-weighted in Fortran); the reaction goes to the nearest body
-    std::vector<vec3> impulse(bodyList.size(), vec3{});
+    std::vector<vec3> impulse(bodyList.size(), vec3{}), impulseTorque(bodyList.size(), vec3{});
     std::vector<double> mAtt(bodyList.size(), 0.0); // mass stuck to each body
     if (bodyList.size()) {
       ppiclf::particles(yLoc, rLoc);
@@ -435,18 +483,32 @@ public:
         size_t bmin = 0;
         double gmin = std::numeric_limits<double>::max();
         for (size_t b = 0; b < bodyList.size(); b++) {
-          vec3 d = minImage(sub(xp, bodyList[b].x));
-          if (bodyList[b].cylinder()) {
+          const auto &bb = bodyList[b];
+          vec3 d = minImage(sub(xp, bb.x));
+          if (bb.cylinder()) {
             d[2] = 0;
           }
-          const double gap = norm(d) - bodyList[b].radius;
+          if (bb.hemisphere) { // distance from the sphere centre, good enough to pick the body
+            const vec3 ax = bb.axis();
+            for (int k = 0; k < 3; k++) {
+              d[k] += Body::kHemiOffset * bb.radius * ax[k];
+            }
+          }
+          const double gap = norm(d) - bb.radius;
           if (gap < gmin) {
             gmin = gap;
             bmin = b;
           }
         }
+        // reaction on the body: the impulse and, for a hemisphere, its moment
+        // about the centre of mass (a sphere's or cylinder's contact normal
+        // passes through the axis: no torque, and the end-of-step arm would
+        // only add roundoff)
+        const vec3 arm = minImage(sub(xp, bodyList[bmin].x));
+        const vec3 tq = bodyList[bmin].hemisphere ? cross(arm, imp) : vec3{};
         for (int k = 0; k < 3; k++) {
           impulse[bmin][k] -= imp[k];
+          impulseTorque[bmin][k] -= tq[k];
         }
       }
     }
@@ -454,7 +516,8 @@ public:
     // 2. bodies
     if (bodyList.size()) {
       const size_t nb = bodyList.size();
-      std::vector<double> buf(10 * nb, 0.0); // force, torque, contact impulse, attached mass
+      constexpr int nbuf = 13; // force, torque, contact impulse, attached mass, contact torque impulse
+      std::vector<double> buf(nbuf * nb, 0.0);
       double slip2 = 0, nslip = 0;
       ppiclf::particles(yLoc, rLoc);
       for (int i = 0; i < ppiclf::numParticles(); i++) {
@@ -468,8 +531,8 @@ public:
             minImage(sub(vec3{yLoc[i * PPICLF_LRS], yLoc[i * PPICLF_LRS + 1], yLoc[i * PPICLF_LRS + 2]}, bodyList[b].x));
         const vec3 t = cross(arm, f);
         for (int k = 0; k < 3; k++) {
-          buf[10 * b + k] += f[k];
-          buf[10 * b + 3 + k] += t[k];
+          buf[nbuf * b + k] += f[k];
+          buf[nbuf * b + 3 + k] += t[k];
         }
         const double s = norm(f) * dt / (cfg.rhof * r[PPICLF_R_JVOLP - 1]);
         slip2 += s * s;
@@ -477,9 +540,10 @@ public:
       }
       for (size_t b = 0; b < nb; b++) {
         for (int k = 0; k < 3; k++) {
-          buf[10 * b + 6 + k] = impulse[b][k];
+          buf[nbuf * b + 6 + k] = impulse[b][k];
+          buf[nbuf * b + 10 + k] = impulseTorque[b][k];
         }
-        buf[10 * b + 9] = mAtt[b];
+        buf[nbuf * b + 9] = mAtt[b];
       }
       MPI_Allreduce(MPI_IN_PLACE, buf.data(), buf.size(), MPI_DOUBLE, MPI_SUM, comm());
       double s2[2] = {slip2, nslip};
@@ -490,7 +554,7 @@ public:
       for (size_t b = 0; b < nb; b++) {
         auto &body = bodyList[b];
         for (int k = 0; k < 3; k++) {
-          hydroOnBody[b][k] = buf[10 * b + k];
+          hydroOnBody[b][k] = buf[nbuf * b + k];
         }
         if (body.fixed) {
           continue;
@@ -505,23 +569,53 @@ public:
           continue;
         }
         const double mEff = (body.rho - cfg.rhof) * body.volume();
-        const double mTot = mEff + buf[10 * b + 9]; // plus the stuck particles
+        const double mTot = mEff + buf[nbuf * b + 9]; // plus the stuck particles
         const bool cyl = body.cylinder();
         const double iEff = (cyl ? 0.5 : 0.4) * mEff * body.radius * body.radius;
-        attachedMassOnBody[b] = buf[10 * b + 9];
+        attachedMassOnBody[b] = buf[nbuf * b + 9];
+        vec3 torque; // hydrodynamic + contact, about the centre of mass
         for (int k = 0; k < 3; k++) {
-          contactOnBody[b][k] = buf[10 * b + 6 + k] / dt;
+          torque[k] = buf[nbuf * b + 3 + k] + buf[nbuf * b + 10 + k] / dt;
+        }
+        for (int k = 0; k < 3; k++) {
+          contactOnBody[b][k] = buf[nbuf * b + 6 + k] / dt;
           if (cyl && k == 2) { // a cylinder stays in its plane and spins about z only
             body.v[2] = body.w[0] = body.w[1] = 0;
-            body.w[2] += dt * buf[10 * b + 5] / iEff;
+            body.w[2] += dt * torque[2] / iEff;
             continue;
           }
-          body.v[k] += dt * ((buf[10 * b + k] + contactOnBody[b][k] + mTot * cfg.grav[k]) / mTot);
+          body.v[k] += dt * ((buf[nbuf * b + k] + contactOnBody[b][k] + mTot * cfg.grav[k]) / mTot);
           body.x[k] += dt * body.v[k];
-          body.w[k] += cyl ? 0 : dt * buf[10 * b + 3 + k] / iEff;
+          if (!cyl && !body.hemisphere) {
+            body.w[k] += dt * torque[k] / iEff;
+          }
           if (cfg.periodic[k]) {
             const double len = hi[k] - lo[k];
             body.x[k] = lo[k] + std::fmod(std::fmod(body.x[k] - lo[k], len) + len, len);
+          }
+        }
+        if (body.hemisphere) {
+          // Euler's equations in the body frame with I = diag(Ixx, Ixx, Izz)
+          const double Ixx = 83.0 / 320.0 * mEff * body.radius * body.radius;
+          const double Izz = 0.4 * mEff * body.radius * body.radius;
+          const double I[3] = {Ixx, Ixx, Izz};
+          vec3 wb{}, tb{};
+          for (int i = 0; i < 3; i++) {
+            for (int k = 0; k < 3; k++) { // rot^T
+              wb[i] += body.rot[k + 3 * i] * body.w[k];
+              tb[i] += body.rot[k + 3 * i] * torque[k];
+            }
+          }
+          const vec3 Iw = {I[0] * wb[0], I[1] * wb[1], I[2] * wb[2]};
+          const vec3 gyro = cross(wb, Iw);
+          for (int i = 0; i < 3; i++) {
+            wb[i] += dt * (tb[i] - gyro[i]) / I[i];
+          }
+          for (int k = 0; k < 3; k++) {
+            body.w[k] = 0;
+            for (int i = 0; i < 3; i++) {
+              body.w[k] += body.rot[k + 3 * i] * wb[i];
+            }
           }
         }
         rotate(body.rot, body.w, dt);
@@ -701,9 +795,9 @@ private:
   {
     int nb = bodyList.size();
     std::vector<double> x, v, w, rot, rad, mass;
-    std::vector<int> cyl;
+    std::vector<int> shape;
     for (const auto &b : bodyList) {
-      cyl.push_back(b.cylinder());
+      shape.push_back(b.shape());
       x.insert(x.end(), b.x.begin(), b.x.end());
       v.insert(v.end(), b.v.begin(), b.v.end());
       w.insert(w.end(), b.w.begin(), b.w.end());
@@ -717,8 +811,8 @@ private:
     rot.push_back(0);
     rad.push_back(0);
     mass.push_back(0);
-    cyl.push_back(0);
-    ppiclc_elibm_SetBodies(&nb, x.data(), v.data(), w.data(), rot.data(), rad.data(), mass.data(), cyl.data());
+    shape.push_back(0);
+    ppiclc_elibm_SetBodies(&nb, x.data(), v.data(), w.data(), rot.data(), rad.data(), mass.data(), shape.data());
   }
 
   // dt == nullptr: initial call, D phi_f/Dt has no history yet

@@ -41,6 +41,9 @@ body_rho = 1374.0
 body_fixed = 0
 # 1: cylinder along z through the slab (el_ibm_cylinder*), 0: sphere (el_ibm_sphere_u10)
 body_cylinder = 1
+# with body_cylinder = 0: 1 makes the body a solid hemisphere of body_radius,
+# dome pointing downstream (+x), flat face towards the inlet
+body_hemisphere = 0
 # water droplets d_p = D/30 = 100 um, inject_per_step every inject_every
 # steps (3333 /s, 1.5 d_p apart along x) at x = inject_x with the stream
 # velocity, mid-plane sheet, |y - y_c| < inject_half_width (< R);

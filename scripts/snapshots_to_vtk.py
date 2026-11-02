@@ -63,6 +63,42 @@ def unit_sphere(nth=8, nph=12):
     return pts, tri
 
 
+def unit_hemisphere(nth=12, nph=32):
+    """Solid hemisphere of radius 1: dome z >= 0, flat face at z = 0 (sphere centre at the origin)."""
+    import math
+    pts, tri = [(0.0, 0.0, 1.0)], []
+    for i in range(1, nth + 1):
+        th = 0.5 * math.pi * i / nth
+        for j in range(nph):
+            ph = 2 * math.pi * j / nph
+            pts.append((math.sin(th) * math.cos(ph), math.sin(th) * math.sin(ph), math.cos(th)))
+    for j in range(nph):
+        tri.append((0, 1 + j, 1 + (j + 1) % nph))
+    for i in range(nth - 1):
+        for j in range(nph):
+            a, b = 1 + i * nph + j, 1 + i * nph + (j + 1) % nph
+            tri += [(a, a + nph, b), (b, a + nph, b + nph)]
+    c = len(pts)
+    pts.append((0.0, 0.0, 0.0))
+    rim = 1 + (nth - 1) * nph
+    for j in range(nph):
+        tri.append((c, rim + (j + 1) % nph, rim + j))
+    return pts, tri
+
+
+def oriented(shape, axis):
+    """Rotate a unit shape so its z axis points along axis (unit vector)."""
+    import math
+    pts, tri = shape
+    z = axis
+    seed = (1.0, 0.0, 0.0) if abs(z[0]) < 0.9 else (0.0, 1.0, 0.0)
+    x = (seed[1] * z[2] - seed[2] * z[1], seed[2] * z[0] - seed[0] * z[2], seed[0] * z[1] - seed[1] * z[0])
+    n = math.sqrt(sum(v * v for v in x))
+    x = tuple(v / n for v in x)
+    y = (z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0])
+    return [tuple(x[k] * p[0] + y[k] * p[1] + z[k] * p[2] for k in range(3)) for p in pts], tri
+
+
 def unit_cylinder(nph=48):
     """Cylinder of radius 1 from z = -0.5 to 0.5, with end caps."""
     import math
@@ -155,8 +191,15 @@ def main():
             if a.body_surface:
                 name = f"vtk/body_surf_{step:05d}.vtp"
                 d = 2 * float(b["radius"])
+                shape = int(float(b.get("shape", 0)))
                 if a.cylinder_length > 0:
                     vtp_surfaces(os.path.join(snap, name), [(b["x"], b["y"], b["z"])], [(d, a.cylinder_length)], cyl,
+                                 {}, {"velocity": [(b["u"], b["v"], b["w"])]})
+                elif shape == 2:
+                    # hemisphere: mesh about the sphere centre, 3R/8 behind the centre of mass along the axis
+                    ax = (float(b["ax"]), float(b["ay"]), float(b["az"]))
+                    cen = tuple(float(b[k]) - 0.375 * 0.5 * d * ax[i] for i, k in enumerate("xyz"))
+                    vtp_surfaces(os.path.join(snap, name), [cen], [d], oriented(unit_hemisphere(), ax),
                                  {}, {"velocity": [(b["u"], b["v"], b["w"])]})
                 else:
                     vtp_surfaces(os.path.join(snap, name), [(b["x"], b["y"], b["z"])], [d], unit_sphere(16, 32),

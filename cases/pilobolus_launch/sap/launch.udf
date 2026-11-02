@@ -36,6 +36,7 @@
 #include "fieldDump.hpp"
 
 static double diameter, bodyRho, vMax, tRise, decel, xStart, markerSpacing, filterWidth;
+static int hemisphere = 0; // 1: sporangium as a solid hemisphere of the same volume, dome forward, flat face trailing
 static int freeFlight, reportInterval;
 static std::string trajectoryFile;
 static std::vector<double> trajT, trajV, trajX; // measured profile (SI)
@@ -105,6 +106,7 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
 {
   auto get = [](const char *key, auto &v) { platform->par->extract("casedata", key, v); };
   get("diameter", diameter);
+  get("hemisphere", hemisphere);
   get("body_rho", bodyRho);
   get("v_max", vMax);
   get("t_rise", tRise);
@@ -173,7 +175,11 @@ void UDF_Setup()
   coupling = new elibm::Coupling(nrs, cfg);
 
   elibm::Body body;
-  body.radius = 0.5 * diameter;
+  body.radius = 0.5 * diameter * (hemisphere ? std::cbrt(2.0) : 1.0); // same volume as the sphere
+  body.hemisphere = hemisphere != 0;
+  if (body.hemisphere) {
+    body.setAxis({1, 0, 0}); // dome towards +x (flight direction), flat face towards the nozzle
+  }
   body.rho = bodyRho;
   body.prescribed = true;
   double x, v, a;

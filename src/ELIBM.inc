@@ -22,5 +22,7 @@
      >       elibm_bmass(elibm_nbmax)
       common /elibm_body_r/ elibm_bx, elibm_bv, elibm_bw, elibm_brot,
      >                      elibm_brad, elibm_bmass
-      integer*4 elibm_bcyl(elibm_nbmax)
-      common /elibm_body_i/ elibm_bcyl
+!     0 sphere, 1 cylinder along z, 2 hemisphere (dome on body +z, centre
+!     of mass 3R/8 in front of the sphere centre)
+      integer*4 elibm_bshape(elibm_nbmax)
+      common /elibm_body_i/ elibm_bshape

@@ -125,11 +125,15 @@ else:
     dg.ColorArrayName = ["POINTS", ""]
     dg.DiffuseColor = [0.85, 0.25, 0.1]
 
-gb = Glyph(Input=body, GlyphType="Sphere")
-gb.GlyphType.ThetaResolution = gb.GlyphType.PhiResolution = 48
-gb.ScaleArray = ["POINTS", "radius"]
-gb.ScaleFactor = 2.0
-gb.GlyphMode = "All Points"
+surf = os.path.join(snap, "body_surf.pvd")
+if os.path.exists(surf): # the body's own surface (snapshots_to_vtk.py --body-surface: hemisphere, cylinder)
+    gb = OpenDataFile(surf)
+else:
+    gb = Glyph(Input=body, GlyphType="Sphere")
+    gb.GlyphType.ThetaResolution = gb.GlyphType.PhiResolution = 48
+    gb.ScaleArray = ["POINTS", "radius"]
+    gb.ScaleFactor = 2.0
+    gb.GlyphMode = "All Points"
 dgb = Show(gb, view)
 dgb.DiffuseColor = [0.75, 0.75, 0.8]
 dgb.Opacity = 0.85

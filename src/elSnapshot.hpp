@@ -1,7 +1,8 @@
 // EL parcel snapshots for ParaView (scripts/snapshots_to_vtk.py): gather the
 // EL parcels to rank 0 and write snapshots/el_XXXXX.csv (id, x, y, z, u, v,
 // w, contact, dp, attached body or 0) and append the first body to
-// snapshots/body.csv (step, t, x, y, z, u, v, w, radius).
+// snapshots/body.csv (step, t, x, y, z, u, v, w, radius, shape, ax, ay, az:
+// shape 0 sphere, 1 cylinder, 2 hemisphere; a = body axis in the lab).
 #pragma once
 #include <cmath>
 #include <cstdio>
@@ -74,10 +75,11 @@ inline void writeSnapshot(Coupling &coupling, double time, int tstep)
   const bool first = tstep == 0;
   f = fopen("snapshots/body.csv", first ? "w" : "a");
   if (first) {
-    fprintf(f, "step,t,x,y,z,u,v,w,radius\n");
+    fprintf(f, "step,t,x,y,z,u,v,w,radius,shape,ax,ay,az\n");
   }
-  fprintf(f, "%d,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e\n", tstep, time, b.x[0], b.x[1], b.x[2], b.v[0], b.v[1],
-          b.v[2], b.radius);
+  const auto ax = b.axis();
+  fprintf(f, "%d,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e,%.8e,%d,%.6e,%.6e,%.6e\n", tstep, time, b.x[0], b.x[1], b.x[2],
+          b.v[0], b.v[1], b.v[2], b.radius, b.shape(), ax[0], ax[1], ax[2]);
   fclose(f);
 }
 
