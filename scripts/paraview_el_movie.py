@@ -37,6 +37,8 @@ ap.add_argument("--zoom", type=float, default=1.0, help="> 1 moves the camera cl
 ap.add_argument("--color-by", default=None, choices=["attached", "contact"],
                 help="colour the parcels by this snapshot scalar instead of a flat colour")
 ap.add_argument("--state", default=None, help="also save a ParaView state file (.pvsm) of the pipeline")
+ap.add_argument("--points", action="store_true", help="draw the EL parcels as points (their size on screen), not as spheres of their diameter")
+ap.add_argument("--point-size", type=float, default=5.0, help="pixel size of the points with --points")
 a = ap.parse_args()
 case = os.path.abspath(a.case)
 snap = os.path.join(case, "snapshots")
@@ -101,12 +103,17 @@ bar.TitleFontSize = 16
 bar.LabelFontSize = 14
 
 # EL parcels (true diameter) and the IBM body (true radius)
-g = Glyph(Input=el, GlyphType="Sphere")
-g.GlyphType.ThetaResolution = g.GlyphType.PhiResolution = 12
-g.ScaleArray = ["POINTS", "diameter"]
-g.ScaleFactor = 1.0
-g.GlyphMode = "All Points"
-dg = Show(g, view)
+if a.points:
+    dg = Show(el, view)
+    dg.SetRepresentationType("Points")
+    dg.PointSize = a.point_size
+else:
+    g = Glyph(Input=el, GlyphType="Sphere")
+    g.GlyphType.ThetaResolution = g.GlyphType.PhiResolution = 12
+    g.ScaleArray = ["POINTS", "diameter"]
+    g.ScaleFactor = 1.0
+    g.GlyphMode = "All Points"
+    dg = Show(g, view)
 if a.color_by:
     ColorBy(dg, ("POINTS", a.color_by))
     glut = GetColorTransferFunction(a.color_by)

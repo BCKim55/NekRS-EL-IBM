@@ -8,9 +8,9 @@ contact, id, diameter) and snapshots/vtk/body_XXXXX.vtp + snapshots/body.pvd
 (IBM body: velocity, radius). Plain XML polydata, no VTK library needed.
 In ParaView open <case>.nek5000 (fluid), el.pvd and body.pvd, and show the
 two point sets with Glyph (sphere, scale by diameter / 2 radius).
---surfaces also writes el_surf.pvd and body_surf.pvd with the droplets and
-the body as triangulated spheres (or a cylinder along z of --cylinder-length),
-which display as solids with no filter; point data contact, id, velocity.
+The EL parcels are point particles and stay points. --body-surface also
+writes body_surf.pvd with the body as a triangulated sphere (or a cylinder
+along z of --cylinder-length), which displays as a solid with no filter.
 """
 import argparse
 import csv
@@ -125,12 +125,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("case")
     ap.add_argument("--dp", type=float, default=0.01, help="EL particle diameter when the csv has no dp column")
-    ap.add_argument("--surfaces", action="store_true", help="also write el_surf.pvd / body_surf.pvd (solids)")
+    ap.add_argument("--body-surface", action="store_true", help="also write body_surf.pvd (solid body)")
     ap.add_argument("--cylinder-length", type=float, default=0, help="> 0: the body is a cylinder along z")
     a = ap.parse_args()
-    sphere = unit_sphere()
     cyl = unit_cylinder()
-    surf_el, surf_body = [], []
+    surf_body = []
     snap = os.path.join(a.case, "snapshots")
     out = os.path.join(snap, "vtk")
     os.makedirs(out, exist_ok=True)
@@ -147,22 +146,13 @@ def main():
              "diameter": [r.get("dp", a.dp) for r in rows], "attached": [r.get("attached", 0) for r in rows]},
             {"velocity": [(r["u"], r["v"], r["w"]) for r in rows]})
         el_entries.append((t, name))
-        if a.surfaces:
-            name = f"vtk/el_surf_{step:05d}.vtp"
-            vtp_surfaces(os.path.join(snap, name), [(r["x"], r["y"], r["z"]) for r in rows],
-                         [r.get("dp", a.dp) for r in rows], sphere,
-                         {"id": [r["id"] for r in rows], "contact": [r["contact"] for r in rows],
-                          "diameter": [r.get("dp", a.dp) for r in rows],
-                          "attached": [r.get("attached", 0) for r in rows]},
-                         {"velocity": [(r["u"], r["v"], r["w"]) for r in rows]})
-            surf_el.append((t, name))
         if step in body:
             b = body[step]
             name = f"vtk/body_{step:05d}.vtp"
             vtp(os.path.join(snap, name), [(b["x"], b["y"], b["z"])], {"radius": [b["radius"]]},
                 {"velocity": [(b["u"], b["v"], b["w"])]})
             body_entries.append((t, name))
-            if a.surfaces:
+            if a.body_surface:
                 name = f"vtk/body_surf_{step:05d}.vtp"
                 d = 2 * float(b["radius"])
                 if a.cylinder_length > 0:
@@ -175,10 +165,9 @@ def main():
     pvd(os.path.join(snap, "el.pvd"), el_entries)
     pvd(os.path.join(snap, "body.pvd"), body_entries)
     print(f"wrote {len(el_entries)} EL and {len(body_entries)} body snapshots: {snap}/el.pvd, {snap}/body.pvd")
-    if a.surfaces:
-        pvd(os.path.join(snap, "el_surf.pvd"), surf_el)
+    if a.body_surface:
         pvd(os.path.join(snap, "body_surf.pvd"), surf_body)
-        print(f"wrote solids: {snap}/el_surf.pvd, {snap}/body_surf.pvd")
+        print(f"wrote solid body: {snap}/body_surf.pvd")
 
 
 if __name__ == "__main__":
