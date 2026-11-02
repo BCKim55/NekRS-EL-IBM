@@ -152,6 +152,7 @@ def main():
             vtp_surfaces(os.path.join(snap, name), [(r["x"], r["y"], r["z"]) for r in rows],
                          [r.get("dp", a.dp) for r in rows], sphere,
                          {"id": [r["id"] for r in rows], "contact": [r["contact"] for r in rows],
+                          "diameter": [r.get("dp", a.dp) for r in rows],
                           "attached": [r.get("attached", 0) for r in rows]},
                          {"velocity": [(r["u"], r["v"], r["w"]) for r in rows]})
             surf_el.append((t, name))
