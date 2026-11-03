@@ -1057,8 +1057,9 @@ orients the axis in the lab; `Body::axis()` returns it. Volume 2/3 πR³.
 
 Cases: `body_hemisphere = 1` in the stream cases (dome downstream, flat face
 towards the inlet and the droplets) and `hemisphere = 1` in
-`pilobolus_launch` (same volume as the d = 0.35 mm sphere, R = 0.22 mm, dome
-forward, flat face towards the nozzle and the sap).
+`pilobolus_launch` (radius `hemisphere_radius`, or with 0 the same volume as
+the d = 0.35 mm sphere, R = 0.22 mm; dome forward, flat face towards the
+nozzle and the sap). C_d is then taken on the hemisphere's frontal width.
 
 Check (`build/el_ibm_hemi_smoke`, `el_ibm_sphere_u10` with `body_hemisphere
 = 1`, 600 steps = 3 ms): 339 markers, stable (CFL 0.51), 100 droplets
@@ -1068,3 +1069,65 @@ overlap is 5.6 µm = 0.06 d_p (the 10 m/s impact overlap u √(m/k_n) =
 |ω| ≈ 1-2 rad/s while the axis stays within 0.002 rad of x over 3 ms.
 Regression: the cylinder case (`el_ibm_bridge` without the bridge, 200
 steps with contacts) reproduces the previous log to roundoff.
+
+### 7.11 Hemispherical sporangium with liquid bridges (`cases/pilobolus_launch/sap_hemi`)
+
+The sap case of 7.5 with the sporangium as the measured cap and the droplets
+held by capillary bridges instead of sticking:
+
+- Yafetto et al. 2008 give no sporangium dimension in the text or Table 1
+  (speeds, accelerations, ranges, pressures only). On their Video S3 the cap
+  is 350-400 µm wide and 150-300 µm high (hand-off, ±25 % scale), so the body
+  is a solid hemisphere of R = 0.19 mm (`hemisphere_radius`; width 0.38 mm,
+  height 0.19 mm, 16.5 ng against 25.8 ng for the equal-volume sphere of
+  7.4), dome forward, flat face towards the nozzle.
+- The jet on the video is 50-100 µm thick: nozzle radius 37.5 µm (7.5's
+  150 µm nozzle was the stalk width). The main drops stay 120 µm (≈ 1.9 ×
+  the jet diameter, the Rayleigh-Plateau drop of a 75 µm jet); t_inj = 0.57
+  ms makes the injected volume flux equal to the jet's (30 nL / (π r_n² v_jet)),
+  so consecutive main drops are 0.23 mm apart instead of touching.
+- Injection is now a non-overlapping train: every step rank 0 gathers the
+  drops within 2 d_main of the nozzle (`gatherElRows`) and places each new
+  drop at a random point of the nozzle disc and of the step's travel that
+  clears all of them by the radii plus one step of jet travel, deferring it
+  otherwise; satellites would only be emitted in the gaps behind a main
+  drop. Before this, satellites were created inside the main drops (the
+  nozzle disc is smaller than a main drop) and the contact spring threw them
+  out at 100-180 m/s; the 7.5 run had the same overlap.
+- No satellites (`sat_fraction = 0`, a few % of the volume): without
+  coalescence a satellite near a main drop is pulled onto its front by the
+  bridge (F_max = 2πσR_eff ≈ 7 µN on 3 pg: 12 m/s in 5 µs) and is then
+  squeezed out at 40 m/s when that drop hits the face (k_n 200 lets the
+  120 µm drop sink 24 µm into the face, engulfing the 18 µm satellite; k_n
+  2000 still ejects it from the wedge). A merge-on-contact model is the
+  next step if satellites matter.
+- Contact: `attach = 0`, `bridge_el = bridge_ibm = 1` (σ 0.072, θ 0, V_b/V_p
+  0.1: rupture gap 45 µm = 0.37 d_main, F_max 27 µN drop-drop and 41 µN
+  drop-body against a drop weight of 9 nN), k_n 2000 (a drop hitting the
+  face at 12 m/s sinks 7.6 µm, bridge sink 20 nm), e = 0.05 (wet contact,
+  the hand-off's "perfectly inelastic"), 10 substeps (contact period 4.2 µs).
+  The main drops hit the face while the sporangium is still slow, stop there
+  (bridge + inelastic) and ride on it; the first one blocks the nozzle for a
+  few tens of µs until the body has moved on (deferred drops are reported).
+
+Run (`build/sap_hemi`, 8 ranks, 1200 steps = 1.2 ms, 12.9 s/step, CFL ≤
+0.60, 555 markers): 33 main drops carry 29.9 of the 30 nL (one deferred at
+the end), none ends inside the body (deepest overlap 4.3 µm = 0.04 d_main,
+`check_hemisphere.py`), the axis stays on x. The drops reach the face while
+the sporangium is still slow, stop there and ride on it: at the end 13 of
+the 31 drops in the domain are within the bridge reach of the surface and 16
+move with the body (|Δu| < 1 m/s), 11 are still in the train behind it and
+5 have slipped round the rim onto the dome (the jet is narrower than the
+cap, so a drop that lands off-centre is pulled round the rim by its bridge).
+Fluid force during coasting −2.94 µN, +3 % against the dry sphere (the
+hemisphere's C_d on its 0.38 mm width is 0.65–0.75 against 0.80 for the
+sphere; the sap train behind it no longer lowers the drag as in 7.5, where
+the sap disc of 775 stuck drops shielded the sphere by 36 %), so the air
+alone would decelerate the lighter 16.5 ng cap at 178 m/s²: still 14 % of
+the measured 1300. The sap momentum peaks at 0.27 nN s at 0.65 ms and falls
+as the drops on the body decelerate with it. Compared with 7.5, the bridge
+model holds about the same sap on the body (13 drops = 11.8 nL = 71 % of
+the body mass, against 90 % stuck there) without the attachment switch.
+Figure `docs/img/pilobolus_launch.png` (red), movie
+`docs/img/pilobolus_sap_hemi.gif`, ParaView `build/sap_hemi/snapshots/{el,
+body,body_surf}.pvd` + `launch.nek5000`.

@@ -2,7 +2,7 @@
 """Post-process cases/pilobolus_launch logs ("launch:" lines).
 
     python3 scripts/pilobolus_launch.py --prescribed build/pil_prescribed.log
-        [--free build/pil_free.log] [--sap build/pil_sap.log] [--out docs/img/pilobolus_launch.png]
+        [--free build/pil_free.log] [--sap build/pil_sap.log[:label]]... [--out docs/img/pilobolus_launch.png]
 
 Prints, for the prescribed run, the fluid force on the sporangium and the
 deceleration it alone would give (a_f = F/(rho_b V)) during the coasting
@@ -48,14 +48,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prescribed", required=True)
     ap.add_argument("--free")
-    ap.add_argument("--sap")
+    ap.add_argument("--sap", action="append", default=[], help="path[:label], repeatable")
     ap.add_argument("--out", default="pilobolus_launch.png")
     a = ap.parse_args()
     V = np.pi / 6 * D**3
     runs = {}
-    for name, path in (("prescribed", a.prescribed), ("free", a.free), ("sap", a.sap)):
+    for name, path in (("prescribed", a.prescribed), ("free", a.free)):
         if path:
             runs[name] = parse(path)
+    saps = {}
+    for i, spec in enumerate(a.sap):
+        path, _, label = spec.partition(":")
+        saps[label or ("sap" if i == 0 else f"sap{i + 1}")] = parse(path)
+    runs.update(saps)
 
     P, _ = runs["prescribed"]
     t, v, af, cd = P[:, 1], P[:, 3], P[:, 10], P[:, 9]
@@ -72,19 +77,18 @@ def main():
         if m.any():
             print(f"free flight: v {vf[fr][0]:.3f} -> {vf[-1]:.3f} m/s over {tf[-1] - tf[fr][0]:.2e} s, "
                   f"mean deceleration {-(vf[-1] - vf[fr][0]) / (tf[-1] - tf[fr][0]):.0f} m/s2 (measured {DECEL_MEAS:.0f})")
-    if "sap" in runs:
-        S, _ = runs["sap"]
+    for label, (S, _) in saps.items():
         ts, afs = S[:, 1], S[:, 10]
         cs = ts > T_RISE + 2e-5
         mb = RHO_B * V
-        print(f"sap: {int(S[-1, 12])} droplets in the domain at the end, {int(S[-1, 13])} stuck "
+        print(f"{label}: {int(S[-1, 12])} droplets in the domain at the end, {int(S[-1, 13])} stuck "
               f"(mass {S[-1, 14]:.3e} kg = {S[-1, 14] / mb:.1%} of the sporangium), "
               f"force on the sporangium at the end {S[-1, 8]:.3e} N (single phase {P[-1, 8]:.3e} N)")
         if cs.any() and coast.any():
             # coasting-phase force on the body with the droplets on it vs dry; the
             # loaded body's fluid-only deceleration counts the stuck mass as inertia
             fs, fd = S[cs, 8].mean(), P[coast, 8].mean()
-            print(f"sap, coasting: fluid force {fs:.3e} N vs dry {fd:.3e} N ({fs / fd - 1:+.0%}), "
+            print(f"{label}, coasting: fluid force {fs:.3e} N vs dry {fd:.3e} N ({fs / fd - 1:+.0%}), "
                   f"fluid-only deceleration of the loaded body {-afs[cs].mean():.0f} m/s2 "
                   f"(a_f mb/(mb + m_stuck): {-(afs[cs] * mb / (mb + S[cs, 14])).mean():.0f}), "
                   f"stuck mass at the end {S[-1, 14] / mb:.1%} of the sporangium")
@@ -94,9 +98,11 @@ def main():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    nrow = 3 if "sap" in runs else 2
+    nrow = 3 if saps else 2
     fig, axs = plt.subplots(nrow, 2, figsize=(11, 3.75 * nrow))
-    color = {"prescribed": "C0", "free": "C1", "sap": "C2"}
+    color = {"prescribed": "C0", "free": "C1"}
+    for i, label in enumerate(saps):
+        color[label] = f"C{2 + i}"
     for name, (R, fr) in runs.items():
         tt, c = R[:, 1] * 1e3, color[name]
         axs[0, 0].plot(tt, R[:, 3], c, label=name)
@@ -111,14 +117,15 @@ def main():
     labels = ["v (m/s)", "a (m/s$^2$)", "x force (µN)", "$C_d$"]
     titles = ["sporangium velocity", "acceleration (prescribed) / measured (free)", "fluid force on the sporangium",
               "drag coefficient"]
-    if "sap" in runs:
-        S, _ = runs["sap"]
-        ts = S[:, 1] * 1e3
-        axs[2, 0].plot(ts, S[:, 12], label="droplets in the domain")
-        axs[2, 0].plot(ts, S[:, 13], label="stuck to the sporangium")
-        axs[2, 1].plot(ts, S[:, 14] / (RHO_B * V) * 100, label="stuck mass / sporangium mass")
+    if saps:
         ax2 = axs[2, 1].twinx()
-        ax2.plot(ts, S[:, 15] * 1e9, "C3", label="sap x momentum (right)")
+        for label, (S, _) in saps.items():
+            ts, c = S[:, 1] * 1e3, color[label]
+            axs[2, 0].plot(ts, S[:, 12], c, label=f"{label}: droplets in the domain")
+            if S[:, 13].max() > 0:
+                axs[2, 0].plot(ts, S[:, 13], "--", color=c, label=f"{label}: stuck to the sporangium")
+                axs[2, 1].plot(ts, S[:, 14] / (RHO_B * V) * 100, c, label=f"{label}: stuck mass / sporangium mass")
+            ax2.plot(ts, S[:, 15] * 1e9, ":", color=c, label=f"{label}: sap x momentum (right)")
         ax2.set_ylabel("sap x momentum (nN s)")
         ax2.legend(fontsize=8, loc="lower right")
         labels += ["count", "stuck mass (%)"]
