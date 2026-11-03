@@ -24,7 +24,8 @@
 #include "fieldDump.hpp"
 
 static double diameter, bodyRho, vMax, tRise, decel, xStart, markerSpacing, filterWidth;
-static int hemisphere = 0; // 1: sporangium as a solid hemisphere of the same volume, dome forward, flat face trailing
+static int hemisphere = 0; // 1: sporangium as a solid hemisphere, dome forward, flat face trailing
+static double hemisphereRadius = 0; // > 0: its radius; 0: the radius of the same volume as the sphere of `diameter`
 static int freeFlight, reportInterval;
 static std::string trajectoryFile;
 static std::vector<double> trajT, trajV, trajX; // measured profile (SI)
@@ -91,6 +92,7 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
   auto get = [](const char *key, auto &v) { platform->par->extract("casedata", key, v); };
   get("diameter", diameter);
   get("hemisphere", hemisphere);
+  get("hemisphere_radius", hemisphereRadius);
   get("body_rho", bodyRho);
   get("v_max", vMax);
   get("t_rise", tRise);
@@ -140,7 +142,7 @@ void UDF_Setup()
   coupling = new elibm::Coupling(nrs, cfg);
 
   elibm::Body body;
-  body.radius = 0.5 * diameter * (hemisphere ? std::cbrt(2.0) : 1.0); // same volume as the sphere
+  body.radius = !hemisphere ? 0.5 * diameter : hemisphereRadius > 0 ? hemisphereRadius : 0.5 * diameter * std::cbrt(2.0);
   body.hemisphere = hemisphere != 0;
   if (body.hemisphere) {
     body.setAxis({1, 0, 0}); // dome towards +x (flight direction), flat face towards the nozzle
@@ -186,7 +188,8 @@ void UDF_ExecuteStep(double time, int tstep)
     const double ax = body.prescribed ? a : (body.v[0] - vPrev) / dt;
     const double fx = fm[0] + rhof * V * ax; // force on the body proper
     const double u = std::max(std::abs(body.v[0]), 1e-12);
-    const double cd = -fx / (0.5 * rhof * u * u * M_PI * diameter * diameter / 4.0) * (body.v[0] < 0 ? -1 : 1);
+    const double dRef = 2 * body.radius; // frontal diameter (hemisphere: its width)
+    const double cd = -fx / (0.5 * rhof * u * u * M_PI * dRef * dRef / 4.0) * (body.v[0] < 0 ? -1 : 1);
     if (platform->comm.mpiRank() == 0) {
       printf("launch: step %d  t %.4e  x %.4e  v %.4f  a %.4e  Fm %.4e %.4e %.4e  F %.4e  Cd %.4f  a_f %.4e  slip %.3e%s\n",
              tstep, time, body.x[0], body.v[0], ax, fm[0], fm[1], fm[2], fx, cd, fx / (bodyRho * V), coupling->slipRms(),

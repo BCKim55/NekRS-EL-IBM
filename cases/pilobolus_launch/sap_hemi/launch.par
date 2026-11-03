@@ -1,0 +1,96 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = endTime
+# 0 - 1.2 ms of flight; dt from the CFL on the band's edge GLL spacing
+# (0.2 mm / 5 elements -> first interval 23 um at 9 m/s: dt 1.3 us at CFL 0.5)
+endTime = 1.2e-3
+dt = 1.0e-6
+timeStepper = tombo2
+checkpointControl = steps
+checkpointInterval = 25
+
+[MESH]
+# launch.box: x in [-2, 10] mm, y, z in [-5, 5] mm, 60 x 14 x 14 elements,
+# fine band |y|,|z| < 0.6 mm with 0.2 mm elements (N = 5: 40 um ~ d/9),
+# 11 760 elements; laptop grid (8 ranks: the nek interface must stay under 2 GB per rank on macOS). hires/ has the Tuolumne grid.
+file = "launch.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-6
+
+[FLUID VELOCITY]
+# 1: far field u = 0, 2: outflow at x+ (dynamic-pressure stabilised)
+boundaryTypeMap = udfDirichlet, zeroNeumann
+residualTol = 1e-8
+# air
+rho = 1.2
+viscosity = 1.8e-5
+
+[CASEDATA]
+# Pilobolus kleinii sporangium (Yafetto et al. 2008): equivalent sphere
+# d = 0.35 mm, rho ~ 1150 kg/m3, launched from rest to v_max in t_rise,
+# then decelerating at `decel` (measured ~1300 m/s2; an equivalent sphere's
+# drag gives ~150-200). Re = v d / nu = 200.
+diameter = 3.5e-4
+# 1: solid hemisphere, dome forward, flat face towards the nozzle; radius hemisphere_radius
+# (0: the same volume as the sphere, R = 0.22 mm)
+# cap measured on Video S3: 350-400 um wide, 150-300 um high -> hemisphere R 0.19 mm
+# (width 0.38 mm; mass 16.5 ng vs 25.8 ng for the d = 0.35 mm sphere)
+hemisphere = 1
+hemisphere_radius = 1.9e-4
+body_rho = 1150.0
+v_max = 8.6
+t_rise = 2.2e-4
+decel = 1300.0
+# sphere centre at t = 0 (just in front of the nozzle at the origin)
+x_start = 2.5e-4
+# mode 0: prescribed x(t), v(t) for the whole run (reports the fluid force)
+#      1: prescribed until t_rise, then free flight under the fluid force
+#         (reports the deceleration the fluid alone produces)
+free_flight = 0
+# optional measured trajectory (columns t_us, speed in m/s; smoothed);
+# empty: the analytic profile above
+trajectory = ""
+# IBM interface: markers ~ 0.6 x the band's mean GLL spacing, FWHM 2 x that
+marker_spacing = 2.5e-5
+filter_width_ibm = 5e-5
+# EL sap droplets: projection FWHM (a few droplet spacings), see design doc 7.5
+filter_width = 2.5e-4
+# sap: total volume, main-droplet and satellite diameters, volume fraction
+# in satellites, jet speed, injection duration, nozzle radius (Yafetto et
+# al. 2008: 10-50 nL, 100-150 um drops, 15-20 um satellites, nozzle 100-190 um)
+sap_volume = 3.0e-11
+d_main = 1.2e-4
+d_sat = 1.8e-5
+# 0: no satellites. Without coalescence a satellite is pulled onto the main drop's
+# front by the bridge (F_max 7 uN on 3 pg) within microseconds and then flung out at
+# 40 m/s when that drop hits the face; a few % of the volume, left out
+sat_fraction = 0.0
+v_jet = 12.0
+v_spread = 0.5
+# t_inj = sap_volume / (pi r_n^2 v_jet): the injected volume flux equals that of the
+# 75 um jet at 12 m/s (main drops 0.23 mm apart, like Rayleigh-Plateau drops of a 75 um jet)
+t_inj = 5.7e-4
+# jet d = 50-100 um on the video -> 75 um
+nozzle_radius = 3.75e-5
+rho_sap = 1005.0
+# droplet-sporangium contact: spring-dashpot plus liquid bridges (design doc 7.9), no sticking
+# kn 2000: a main drop hitting the face at 12 m/s sinks 7.6 um (< d_sat, so a
+# satellite caught between them is not engulfed; kn 200 flung them out at 40 m/s);
+# main-drop contact period 4.2 us -> 10 substeps of 0.1 us; bridge sink 20 nm
+attach = 0
+kn = 2000.0
+# e ~ 0: wet drops on a wet body (hand-off: perfectly inelastic); e 0.5 let satellites
+# squeezed between a main drop and the flat face bounce out at 50 m/s
+restitution = 0.05
+substeps = 10
+bridge_el = 1
+bridge_ibm = 1
+sigma = 0.072
+contact_angle_deg = 0
+bridge_volume_fraction = 0.1
+report_interval = 20
+# EL/body snapshots every n steps for the movie (0: off)
+snapshot_interval = 5

@@ -2,11 +2,18 @@
 // case (../launch.udf) plus EL sap droplets injected at the nozzle (main
 // drops d_main and satellites d_sat, jet speed v_jet, for t < t_inj, total
 // volume sap_volume) that stick to the sporangium on contact
-// (Config::attachOnContact) and then ride on it, adding their mass. The EL
+// (attach = 1, Config::attachOnContact) and then ride on it, adding their
+// mass, or bounce and hold liquid bridges (attach = 0, bridge_*). The EL
 // projection uses filter_width (a few droplet spacings), the IBM markers
 // filter_width_ibm. Extra report columns: droplets in the domain, stuck
 // count and mass, sap momentum. snapshot_interval > 0: EL/body snapshots
 // for ParaView (src/elSnapshot.hpp, scripts/paraview_el_movie.py).
+// Injection is a non-overlapping train: a main drop every V_main / Q_main,
+// satellites only in the gap behind it (never while a main drop is at the
+// nozzle), each placed at a random point of the nozzle disc and of the
+// step's travel that clears every drop now within 2 d_main of the nozzle,
+// including ones thrown back (deferred otherwise). Overlapping drops would
+// be thrown apart by the contact spring.
 //
 // Base case: an IBM
 // sphere (equivalent sporangium, d = 0.35 mm) driven along +x through air at
@@ -27,6 +34,7 @@
 //   instead of the analytic profile.
 
 #include <algorithm>
+#include <array>
 #include <random>
 #include <fstream>
 #include <sstream>
@@ -36,7 +44,10 @@
 #include "fieldDump.hpp"
 
 static double diameter, bodyRho, vMax, tRise, decel, xStart, markerSpacing, filterWidth;
-static int hemisphere = 0; // 1: sporangium as a solid hemisphere of the same volume, dome forward, flat face trailing
+static int hemisphere = 0; // 1: sporangium as a solid hemisphere, dome forward, flat face trailing
+static double hemisphereRadius = 0; // > 0: its radius; 0: the radius of the same volume as the sphere of `diameter`
+static double restitution = 0.9, sigma = 0.072, contactAngleDeg = 0, bridgeVolumeFraction = 0.1;
+static int bridgeEl = 0, bridgeIbm = 0;
 static int freeFlight, reportInterval;
 static std::string trajectoryFile;
 static std::vector<double> trajT, trajV, trajX; // measured profile (SI)
@@ -44,7 +55,7 @@ static elibm::Coupling *coupling = nullptr;     // never deleted (MPI resources)
 static double vPrev = 0;
 static double filterWidthIbm, sapVolume, dMain, dSat, satFraction, vJet, vSpread, tInj, nozzleRadius, rhoSap, kn;
 static int attach, substeps, snapshotInterval = 0;
-static double carryMain = 0, carrySat = 0, injectedVolume = 0;
+static double carryMain = 0, carrySat = 0, injectedVolume = 0, tLastMain = -1;
 static std::mt19937_64 rng(2026);
 
 #ifdef __okl__
@@ -107,6 +118,7 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
   auto get = [](const char *key, auto &v) { platform->par->extract("casedata", key, v); };
   get("diameter", diameter);
   get("hemisphere", hemisphere);
+  get("hemisphere_radius", hemisphereRadius);
   get("body_rho", bodyRho);
   get("v_max", vMax);
   get("t_rise", tRise);
@@ -131,6 +143,12 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
   get("attach", attach);
   get("kn", kn);
   get("substeps", substeps);
+  get("restitution", restitution);
+  get("bridge_el", bridgeEl);
+  get("bridge_ibm", bridgeIbm);
+  get("sigma", sigma);
+  get("contact_angle_deg", contactAngleDeg);
+  get("bridge_volume_fraction", bridgeVolumeFraction);
 
   if (!trajectoryFile.empty()) {
     std::ifstream f(trajectoryFile);
@@ -169,13 +187,20 @@ void UDF_Setup()
   cfg.qtl = false;
   cfg.zeroMeanDiv = false;
   cfg.kn = kn;
-  cfg.restitution = 0.9; // irrelevant with attachment
+  cfg.restitution = restitution; // irrelevant with attachment
   cfg.substeps = substeps;
   cfg.attachOnContact = attach != 0;
+  cfg.bridgeEl = bridgeEl != 0;
+  cfg.bridgeIbm = bridgeIbm != 0;
+  cfg.sigma = sigma;
+  cfg.contactAngle = contactAngleDeg * M_PI / 180;
+  cfg.bridgeVolumeFraction = bridgeVolumeFraction;
+  // EL-EL search radius: contact of the main drops, plus the bridge reach
+  cfg.neighborWidth = dMain + (bridgeEl ? cfg.bridgeRupture(dMain) : 0);
   coupling = new elibm::Coupling(nrs, cfg);
 
   elibm::Body body;
-  body.radius = 0.5 * diameter * (hemisphere ? std::cbrt(2.0) : 1.0); // same volume as the sphere
+  body.radius = !hemisphere ? 0.5 * diameter : hemisphereRadius > 0 ? hemisphereRadius : 0.5 * diameter * std::cbrt(2.0);
   body.hemisphere = hemisphere != 0;
   if (body.hemisphere) {
     body.setAxis({1, 0, 0}); // dome towards +x (flight direction), flat face towards the nozzle
@@ -194,6 +219,17 @@ void UDF_Setup()
     printf("launch: d %.3e  rho_b/rho_f %.1f  v_max %.2f (Re %.0f)  t_rise %.2e  decel %.0f  markers %lld  mode %s%s\n", diameter,
            bodyRho / cfg.rhof, vMax, vMax * diameter * cfg.rhof / cfg.mu, tRise, decel, tot.nMarker,
            freeFlight ? "free flight after t_rise" : "prescribed", trajT.empty() ? "" : " (measured v(t))");
+    if (hemisphere) {
+      printf("launch: hemisphere R %.3e (width %.3e, mass %.3e kg vs sphere %.3e)\n", body.radius, 2 * body.radius,
+             bodyRho * body.volume(), bodyRho * M_PI / 6 * diameter * diameter * diameter);
+    }
+    if (bridgeEl || bridgeIbm) {
+      const double r = 0.5 * dMain, Rb = body.radius, c = std::cos(cfg.contactAngle);
+      printf("launch: liquid bridge EL %d IBM %d  sigma %.3e  theta %.0f deg  V_b/V_p %.2f  rupture gap %.3e (%.2f d_main)"
+             "  F_max EL-EL %.3e N  EL-IBM %.3e N  (main drop weight %.3e N)\n",
+             bridgeEl, bridgeIbm, sigma, contactAngleDeg, bridgeVolumeFraction, cfg.bridgeRupture(dMain), cfg.bridgeRupture(dMain) / dMain,
+             2 * M_PI * sigma * r * c, 2 * M_PI * sigma * (2 * r * Rb / (r + Rb)) * c, rhoSap * M_PI / 6 * dMain * dMain * dMain * 9.81);
+    }
   }
 }
 
@@ -216,27 +252,63 @@ void UDF_ExecuteStep(double time, int tstep)
 
   // sap injection at the nozzle (rank 0 creates, collective call)
   std::vector<elibm::ElParticle> list;
-  if (tstep > 0 && time <= tInj + 0.5 * dt && platform->comm.mpiRank() == 0) {
+  const bool injecting = tstep > 0 && time <= tInj + 0.5 * dt;
+  const auto all = injecting ? elibm::gatherElRows() : std::vector<double>{}; // collective
+  if (injecting && platform->comm.mpiRank() == 0) {
     const double volStep = sapVolume * dt / tInj;
-    carryMain += volStep * (1 - satFraction) / (M_PI / 6 * dMain * dMain * dMain);
+    const double vMainDrop = M_PI / 6 * dMain * dMain * dMain;
+    const double tMain = vMainDrop / (sapVolume * (1 - satFraction) / tInj); // main-drop period
+    carryMain += volStep * (1 - satFraction) / vMainDrop;
     carrySat += volStep * satFraction / (M_PI / 6 * dSat * dSat * dSat);
     std::uniform_real_distribution<double> uni(0.0, 1.0);
     std::normal_distribution<double> gauss(0.0, 1.0);
-    auto emit = [&](double d, double &carry) {
+    const double x0 = 1e-6; // nozzle plane
+    // drops now within 2 d_main of the nozzle (gathered above), plus this step's: (x, y, z, d)
+    std::vector<std::array<double, 4>> near;
+    for (size_t i = 0; i + elibm::kElCols <= all.size(); i += elibm::kElCols) {
+      if (all[i + 1] < x0 + 2 * dMain) {
+        near.push_back({all[i + 1], all[i + 2], all[i + 3], all[i + 8]});
+      }
+    }
+    auto emit = [&](double d, double &carry, int tries) {
       while (carry >= 1) {
-        carry -= 1;
         elibm::ElParticle p;
-        const double r = nozzleRadius * std::sqrt(uni(rng)), th = 2 * M_PI * uni(rng);
-        p.x = {1e-6, r * std::cos(th), r * std::sin(th)}; // just outside the nozzle plane
+        std::array<double, 4> q{};
+        bool ok = false;
+        for (int k = 0; k < tries && !ok; ++k) {
+          const double r = (nozzleRadius - 0.5 * d > 0 ? nozzleRadius - 0.5 * d : 0) * std::sqrt(uni(rng)), th = 2 * M_PI * uni(rng);
+          q = {x0 + vJet * uni(rng) * dt, r * std::cos(th), r * std::sin(th), d}; // emitted during this step
+          ok = true;
+          for (const auto &o : near) { // clearance: radii + one step of jet travel
+            const double dx = o[0] - q[0], dy = o[1] - q[1], dz = o[2] - q[2];
+            if (std::sqrt(dx * dx + dy * dy + dz * dz) < 0.5 * (o[3] + d) + vJet * dt) {
+              ok = false;
+              break;
+            }
+          }
+        }
+        if (!ok) {
+          break; // no free slot this step: keep the carry
+        }
+        carry -= 1;
+        near.push_back(q);
+        p.x = {q[0], q[1], q[2]};
         p.v = {vJet, vSpread * gauss(rng), vSpread * gauss(rng)};
         p.dp = d;
         p.rho = rhoSap;
         list.push_back(p);
         injectedVolume += M_PI / 6 * d * d * d;
+        if (d == dMain) {
+          tLastMain = time - (q[0] - x0) / vJet;
+        }
       }
     };
-    emit(dMain, carryMain);
-    emit(dSat, carrySat);
+    emit(dMain, carryMain, 20);
+    // satellites only in the gap: the last main drop has cleared the nozzle and the next is not due yet
+    const double clear = 1.1 * 0.5 * (dMain + dSat) / vJet;
+    if (time - tLastMain >= clear && (1 - carryMain) * tMain >= clear) {
+      emit(dSat, carrySat, 50);
+    }
   }
   if (tstep > 0) {
     coupling->inject(list);
@@ -249,13 +321,17 @@ void UDF_ExecuteStep(double time, int tstep)
     const double ax = body.prescribed ? a : (body.v[0] - vPrev) / dt;
     const double fx = fm[0] + rhof * V * ax; // force on the body proper
     const double u = std::max(std::abs(body.v[0]), 1e-12);
-    const double cd = -fx / (0.5 * rhof * u * u * M_PI * diameter * diameter / 4.0) * (body.v[0] < 0 ? -1 : 1);
+    const double dRef = 2 * body.radius; // frontal diameter (hemisphere: its width)
+    const double cd = -fx / (0.5 * rhof * u * u * M_PI * dRef * dRef / 4.0) * (body.v[0] < 0 ? -1 : 1);
     const auto tot = coupling->totals(); // collective
     if (platform->comm.mpiRank() == 0) {
       printf("launch: step %d  t %.4e  x %.4e  v %.4f  a %.4e  Fm %.4e %.4e %.4e  F %.4e  Cd %.4f  a_f %.4e  slip %.3e"
              "  drops %lld  stuck %lld  m_stuck %.3e  P_sap %.4e%s\n",
              tstep, time, body.x[0], body.v[0], ax, fm[0], fm[1], fm[2], fx, cd, fx / (bodyRho * V), coupling->slipRms(),
              tot.nEl, tot.nAttached, tot.attachedMass, tot.elMomentum[0], body.prescribed ? "" : "  free");
+      if (nrs->lastStep) {
+        printf("launch: injected %.4e m3 of %.4e (main carry %.2f, satellite carry %.2f deferred)\n", injectedVolume, sapVolume, carryMain, carrySat);
+      }
     }
   }
   if (snapshotInterval > 0 && (tstep % snapshotInterval == 0 || nrs->lastStep)) {
