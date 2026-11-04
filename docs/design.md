@@ -1131,3 +1131,35 @@ the body mass, against 90 % stuck there) without the attachment switch.
 Figure `docs/img/pilobolus_launch.png` (red), movie
 `docs/img/pilobolus_sap_hemi.gif`, ParaView `build/sap_hemi/snapshots/{el,
 body,body_surf}.pvd` + `launch.nek5000`.
+
+**Position and speed against the Video S3 track** (`scripts/pilobolus_trajectory.py`
+→ `docs/img/pilobolus_trajectory.png`; track `Spore/results/trajectory.csv`,
+63 frames at 20 µs, 15.3 px/mm, release at frame 122.25 per the force
+analysis, so t = 0 is the release and x = 0 the rest position; the hollow
+markers rescale lengths and speeds by 15.3/20 for the morphology-based
+20 px/mm that the prescribed profile was built on). Both runs (dry sphere of
+7.4 and sap_hemi) drive the body with the same half-cosine, so their
+prescribed curves coincide; the dashed curves integrate a_f alone from
+t_rise as an air-only free flight.
+
+| | video 15.3 px/mm | video 20 px/mm | prescribed | air only (hemi / sphere) |
+|---|---|---|---|---|
+| peak speed [m/s] | 11.2 at 0.22 ms (SG7) | 8.6 | 8.6 at 0.22 ms | 8.6 |
+| speed at 1.2 ms [m/s] | 9.0 | 6.9 | 7.3 | 8.42 / 8.49 |
+| position at 1.2 ms [mm] | 11.7 | 8.9 | 8.75 | 9.28 / 9.32 |
+| flight deceleration [m/s²] | 1550 (fit > 0.3 ms; 1592 ± 103 in the force analysis) | 1180 | 1300 | 179 / 111 |
+
+![Pilobolus trajectory](img/pilobolus_trajectory.png)
+
+At 20 px/mm the prescribed profile lands within 0.2 mm and 0.4 m/s of the
+track at 1.2 ms, but it reaches full speed too late: the video has the cap at
+its plateau within ~0.1 ms (SG7) and, filter-free, at 10 m/s within 40 µs,
+whereas the half-cosine takes 0.22 ms, so the simulated body trails the
+track by 0.4 mm over the first 0.4 ms. The 0.22 ms "peak" came from the
+7-frame Savitzky–Golay smoothing of the launch, which the force analysis
+flags as an artifact; a next prescribed run should rise in ≤ 40 µs
+(≥ 2.5e5 m/s², the paper's 2.1e5). The air-only curves restate the
+conclusion of 7.4 and 7.11: with the fluid force alone the body would still
+be at 8.4–8.5 m/s at 1.2 ms against the measured 6.9 (20 px/mm) or 9.0
+(15.3 px/mm) from a correspondingly higher launch speed; the measured
+deceleration is 6.6× (hemisphere) to 10.7× (sphere) what the air supplies.
