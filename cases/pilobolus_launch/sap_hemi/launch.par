@@ -37,7 +37,7 @@ diameter = 3.5e-4
 # 1: solid hemisphere, dome forward, flat face towards the nozzle; radius hemisphere_radius
 # (0: the same volume as the sphere, R = 0.22 mm)
 # cap measured on Video S3: 350-400 um wide, 150-300 um high -> hemisphere R 0.19 mm
-# (width 0.38 mm; mass 16.5 ng vs 25.8 ng for the d = 0.35 mm sphere)
+# (width 0.38 mm; mass 16.5 ug vs 25.8 ug for the d = 0.35 mm sphere)
 hemisphere = 1
 hemisphere_radius = 1.9e-4
 body_rho = 1150.0

@@ -853,8 +853,8 @@ With `attach = 0` the collision case is unchanged to all digits.
 Laptop result (prescribed v(t), 1200 steps, 8 ranks, 3–23 s/step with the
 EL work): of the 1011 droplets injected in 0.3 ms (30 main drops, ~980
 satellites) 775 are stuck by 0.86 ms and 1005 are still in the box at the
-end; the stuck mass is 23.2 ng = 77 % of the sap and **90 % of the
-sporangium's own mass** (the 30 nL of sap outweighs the 26 ng sporangium),
+end; the stuck mass is 23.2 µg = 77 % of the sap and **90 % of the
+sporangium's own mass** (the 30 nL of sap outweighs the 26 µg sporangium),
 reached in a saturating curve: the main drops, which carry the mass, hit
 within 0.4 ms, the satellites trickle in until 0.9 ms. The fluid force on
 the sporangium during coasting is 1.8 µN against 2.9 µN dry (−36 %,
@@ -1079,7 +1079,7 @@ held by capillary bridges instead of sticking:
   (speeds, accelerations, ranges, pressures only). On their Video S3 the cap
   is 350-400 µm wide and 150-300 µm high (hand-off, ±25 % scale), so the body
   is a solid hemisphere of R = 0.19 mm (`hemisphere_radius`; width 0.38 mm,
-  height 0.19 mm, 16.5 ng against 25.8 ng for the equal-volume sphere of
+  height 0.19 mm, 16.5 µg against 25.8 µg for the equal-volume sphere of
   7.4), dome forward, flat face towards the nozzle.
 - The jet on the video is 50-100 µm thick: nozzle radius 37.5 µm (7.5's
   150 µm nozzle was the stalk width). The main drops stay 120 µm (≈ 1.9 ×
@@ -1123,7 +1123,7 @@ Fluid force during coasting −2.94 µN, +3 % against the dry sphere (the
 hemisphere's C_d on its 0.38 mm width is 0.65–0.75 against 0.80 for the
 sphere; the sap train behind it no longer lowers the drag as in 7.5, where
 the sap disc of 775 stuck drops shielded the sphere by 36 %), so the air
-alone would decelerate the lighter 16.5 ng cap at 178 m/s²: still 14 % of
+alone would decelerate the lighter 16.5 µg cap at 178 m/s²: still 14 % of
 the measured 1300. The sap momentum peaks at 0.27 nN s at 0.65 ms and falls
 as the drops on the body decelerate with it. Compared with 7.5, the bridge
 model holds about the same sap on the body (13 drops = 11.8 nL = 71 % of
