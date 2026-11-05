@@ -60,8 +60,13 @@ filter_width = 1.0e-4
 # of 25 um parcels (jet d / 4, ~4 900 parcels) injected at the volume flux of a
 # 100 um jet at 15 m/s: t_inj = V / (pi r_n^2 v_jet) = 0.34 ms. jet d 100 um:
 # 2 px on the video, blur-corrected 65-130 um at 15.3 px/mm; v_jet: the hand-off's
-# 12 m/s (20 px/mm) rescaled by 20/15.3
+# 12 m/s (20 px/mm) rescaled by 20/15.3. jet_mode 1: the parcels form a dense
+# non-overlapping stream (touching allowed; random packing ~0.4) in a disc of
+# inject_radius 100 um (80 um deferred 25 % of the parcels), so the liquid flux is the jet's.
+# (Overlapping injection is not an option: kn x 25 um overlap on an 8 ng parcel
+# blows the stream apart at 20 m/s.)
 jet_mode = 1
+inject_radius = 1.0e-4
 sap_volume = 4.0e-11
 d_main = 2.5e-5
 d_sat = 1.8e-5

@@ -56,7 +56,8 @@ static double vPrev = 0;
 static double filterWidthIbm, sapVolume, dMain, dSat, satFraction, vJet, vSpread, tInj, nozzleRadius, rhoSap, kn;
 static int attach, substeps, snapshotInterval = 0;
 static double carryMain = 0, carrySat = 0, injectedVolume = 0, tLastMain = -1;
-static int jetMode = 0; // 1: continuous jet of small parcels, overlaps allowed at injection
+static int jetMode = 0; // 1: dense stream of small parcels: touching allowed, no overlap, placed in a disc of inject_radius
+static double injectRadius = 0;
 static std::mt19937_64 rng(2026);
 
 #ifdef __okl__
@@ -137,6 +138,7 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
   get("d_sat", dSat);
   get("sat_fraction", satFraction);
   get("jet_mode", jetMode);
+  get("inject_radius", injectRadius);
   get("v_jet", vJet);
   get("v_spread", vSpread);
   get("t_inj", tInj);
@@ -255,7 +257,7 @@ void UDF_ExecuteStep(double time, int tstep)
   // sap injection at the nozzle (rank 0 creates, collective call)
   std::vector<elibm::ElParticle> list;
   const bool injecting = tstep > 0 && time <= tInj + 0.5 * dt;
-  const auto all = injecting && !jetMode ? elibm::gatherElRows() : std::vector<double>{}; // collective
+  const auto all = injecting ? elibm::gatherElRows() : std::vector<double>{}; // collective
   if (injecting && platform->comm.mpiRank() == 0) {
     const double volStep = sapVolume * dt / tInj;
     const double vMainDrop = M_PI / 6 * dMain * dMain * dMain;
@@ -278,15 +280,13 @@ void UDF_ExecuteStep(double time, int tstep)
         std::array<double, 4> q{};
         bool ok = false;
         for (int k = 0; k < tries && !ok; ++k) {
-          const double r = (nozzleRadius - 0.5 * d > 0 ? nozzleRadius - 0.5 * d : 0) * std::sqrt(uni(rng)), th = 2 * M_PI * uni(rng);
+          const double rMax = (jetMode && injectRadius > 0 ? injectRadius : nozzleRadius) - 0.5 * d;
+          const double r = (rMax > 0 ? rMax : 0) * std::sqrt(uni(rng)), th = 2 * M_PI * uni(rng);
           q = {x0 + vJet * uni(rng) * dt, r * std::cos(th), r * std::sin(th), d}; // emitted during this step
           ok = true;
-          if (jetMode) {
-            break; // liquid is continuous: parcels may overlap, contact + bridges relax them
-          }
-          for (const auto &o : near) { // clearance: radii + one step of jet travel
+          for (const auto &o : near) { // clearance: radii (+ one step of jet travel for a drop train)
             const double dx = o[0] - q[0], dy = o[1] - q[1], dz = o[2] - q[2];
-            if (std::sqrt(dx * dx + dy * dy + dz * dz) < 0.5 * (o[3] + d) + vJet * dt) {
+            if (std::sqrt(dx * dx + dy * dy + dz * dz) < 0.5 * (o[3] + d) + (jetMode ? 0 : vJet * dt)) {
               ok = false;
               break;
             }
@@ -296,9 +296,7 @@ void UDF_ExecuteStep(double time, int tstep)
           break; // no free slot this step: keep the carry
         }
         carry -= 1;
-        if (!jetMode) {
-          near.push_back(q);
-        }
+        near.push_back(q);
         p.x = {q[0], q[1], q[2]};
         p.v = {vJet, vSpread * gauss(rng), vSpread * gauss(rng)};
         p.dp = d;
@@ -310,7 +308,7 @@ void UDF_ExecuteStep(double time, int tstep)
         }
       }
     };
-    emit(dMain, carryMain, 20);
+    emit(dMain, carryMain, jetMode ? 60 : 20);
     // satellites only in the gap: the last main drop has cleared the nozzle and the next is not due yet
     const double clear = 1.1 * 0.5 * (dMain + dSat) / vJet;
     if (time - tLastMain >= clear && (1 - carryMain) * tMain >= clear) {
