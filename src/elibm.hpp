@@ -52,6 +52,7 @@ void ppiclc_elibm_SetBodies(int *nb,
                             int *shape);
 void ppiclc_elibm_PlaceMarkers();
 void ppiclc_elibm_BeginStep();
+void ppiclc_elibm_GetBridgeImpulse(int *nb, double *bimp);
 void ppiclc_solve_InitParticleFilter(int *jfilt); // ppiclF patch 0006
 }
 
@@ -209,6 +210,11 @@ public:
   double slipRms() const { return slipRmsLast; }
   // hydrodynamic force on each body (sum of the marker reactions) from the last step
   const std::vector<vec3> &hydroForceOnBodies() const { return hydroOnBody; }
+  // contact force on each body from the EL parcels over the last step (spring-dashpot,
+  // liquid bridges and the impulse of parcels that stuck), and its liquid-bridge part;
+  // reported for fixed and prescribed bodies too
+  const std::vector<vec3> &contactForceOnBodies() const { return contactOnBody; }
+  const std::vector<vec3> &bridgeForceOnBodies() const { return bridgeOnBody; }
   // mass of the EL particles stuck to each body (attachOnContact)
   const std::vector<double> &attachedMass() const { return attachedMassOnBody; }
 
@@ -388,6 +394,7 @@ public:
     ppiclc_elibm_PlaceMarkers();
 
     contactOnBody.assign(bodyList.size(), vec3{});
+    bridgeOnBody.assign(bodyList.size(), vec3{});
     attachedMassOnBody.assign(bodyList.size(), 0.0);
     updateSources(nullptr);
   }
@@ -528,6 +535,9 @@ public:
       const size_t nb = bodyList.size();
       constexpr int nbuf = 13; // force, torque, contact impulse, attached mass, contact torque impulse
       std::vector<double> buf(nbuf * nb, 0.0);
+      std::vector<double> bimp(3 * nb);
+      int nbi = nb;
+      ppiclc_elibm_GetBridgeImpulse(&nbi, bimp.data());
       double slip2 = 0, nslip = 0;
       ppiclf::particles(yLoc, rLoc);
       for (int i = 0; i < ppiclf::numParticles(); i++) {
@@ -554,8 +564,13 @@ public:
           buf[nbuf * b + 10 + k] = impulseTorque[b][k];
         }
         buf[nbuf * b + 9] = mAtt[b];
+        for (int k = 0; k < 3; k++) {
+          bimp[3 * b + k] = -bimp[3 * b + k]; // reaction on the body
+        }
       }
       MPI_Allreduce(MPI_IN_PLACE, buf.data(), buf.size(), MPI_DOUBLE, MPI_SUM, comm());
+      // reduced apart from buf so the body sums keep their reduction order (bit-identical free-body runs)
+      MPI_Allreduce(MPI_IN_PLACE, bimp.data(), bimp.size(), MPI_DOUBLE, MPI_SUM, comm());
       double s2[2] = {slip2, nslip};
       MPI_Allreduce(MPI_IN_PLACE, s2, 2, MPI_DOUBLE, MPI_SUM, comm());
       slipRmsLast = s2[1] > 0 ? std::sqrt(s2[0] / s2[1]) : 0;
@@ -565,6 +580,8 @@ public:
         auto &body = bodyList[b];
         for (int k = 0; k < 3; k++) {
           hydroOnBody[b][k] = buf[nbuf * b + k];
+          contactOnBody[b][k] = buf[nbuf * b + 6 + k] / dt;
+          bridgeOnBody[b][k] = bimp[3 * b + k] / dt;
         }
         if (body.fixed) {
           continue;
@@ -588,7 +605,6 @@ public:
           torque[k] = buf[nbuf * b + 3 + k] + buf[nbuf * b + 10 + k] / dt;
         }
         for (int k = 0; k < 3; k++) {
-          contactOnBody[b][k] = buf[nbuf * b + 6 + k] / dt;
           if (cyl && k == 2) { // a cylinder stays in its plane and spins about z only
             body.v[2] = body.w[0] = body.w[1] = 0;
             body.w[2] += dt * torque[2] / iEff;
@@ -718,7 +734,7 @@ private:
   std::vector<ElParticle> elList;
   long long nElGlobal = 0;
   std::vector<Body> bodyList;
-  std::vector<vec3> contactOnBody, hydroOnBody;
+  std::vector<vec3> contactOnBody, bridgeOnBody, hydroOnBody;
   std::vector<double> attachedMassOnBody;
   std::vector<double> massLocal;
   std::vector<double> phifLast;

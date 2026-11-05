@@ -36,7 +36,10 @@ for i, r in enumerate(a.run):
     c = "C%d" % i
     ax[0].plot(t, (L["x"] - a.x0) * 1e3, c, lw=1.5, label="run, %s" % lab)
     ax[1].plot(t, L["v"], c, lw=1.5, label="run (prescribed), %s" % lab)
-    ax[2].plot(t, L["a_f"], c, lw=1.5, label="run a_f (air + sap), %s" % lab)
+    ax[2].plot(t, L["a_f"], c, lw=1.5, label="run a_f (fluid), %s" % lab)
+    if np.isfinite(L["a_c"]).any():  # contact + bridge force of the sap on the body (newer logs)
+        ax[2].plot(t, L["a_c"], c, lw=1, ls=":", label="run a_c (sap contact + bridges), %s" % lab)
+        ax[2].plot(t, L["a_tot"], c, lw=2, ls="--", label="run a_f + a_c, %s" % lab)
     if i == 0:
         ax[2].plot(t, L["a"], "C3--", lw=1, label="run, prescribed a")
 ax[0].set(xlabel="t [ms]", ylabel="x − x(0) [mm]", title="position")
@@ -52,4 +55,6 @@ print("Video S3 mean decel 0.4-1.24 ms: %.0f m/s^2" % -ae[m].mean())
 for r in a.run:
     lab, d = r.split("=", 1); L = read_log(d); mm = L["t"] * 1e3 >= 0.4
     print("%s: mean a_f %.0f m/s^2 = %.0f %% of the measured decel" % (lab, L["a_f"][mm].mean(), 100 * L["a_f"][mm].mean() / ae[m].mean()))
+    if np.isfinite(L["a_c"]).any():
+        print("   a_c %.0f, a_f + a_c %.0f m/s^2 = %.0f %%" % (L["a_c"][mm].mean(), L["a_tot"][mm].mean(), 100 * L["a_tot"][mm].mean() / ae[m].mean()))
 print("wrote", a.out)

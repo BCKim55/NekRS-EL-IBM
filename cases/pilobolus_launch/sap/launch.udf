@@ -25,9 +25,12 @@
 //   report_interval steps ("launch:"): x, v, a of the body, the marker force
 //   sum F_m (fluid force on body + internal fluid), the force on the body
 //   proper F = F_m + rho_f V a, C_d = -F_x / (rho_f v^2 pi d^2 / 8), and the
-//   deceleration that force alone would give the body, a_f = F_x / (rho_b V).
-//   The measured deceleration (~1300 m/s2) minus a_f is what the sap must
-//   supply.
+//   deceleration that force alone would give the body, a_f = F_x / (rho_b V);
+//   F_c, the contact force of the sap parcels on the body (spring-dashpot,
+//   liquid bridges and the impulse of parcels that stick), its bridge part
+//   F_br, a_c = F_c / (rho_b V) and a_tot = a_f + a_c. a_tot is what the
+//   measured deceleration (~1500 m/s2) has to be compared with; with a
+//   prescribed body it is the force the measured v(t) needs to tow the sap.
 // free_flight = 1: prescribed until t_rise, then a free body under the
 //   fluid force and gravity: the deceleration of a dry sporangium.
 // trajectory = "file.csv" (t_us, speed): v(t) from the smoothed measurement
@@ -322,6 +325,8 @@ void UDF_ExecuteStep(double time, int tstep)
 
   if (tstep > 0 && (tstep % reportInterval == 0 || nrs->lastStep)) {
     const auto fm = coupling->hydroForceOnBodies()[0];
+    // contact force of the sap on the body (spring-dashpot + bridges + stuck parcels) and its bridge part
+    const auto fcn = coupling->contactForceOnBodies()[0], fbr = coupling->bridgeForceOnBodies()[0];
     const double rhof = 1.2, V = body.volume();
     const double ax = body.prescribed ? a : (body.v[0] - vPrev) / dt;
     const double fx = fm[0] + rhof * V * ax; // force on the body proper
@@ -331,9 +336,10 @@ void UDF_ExecuteStep(double time, int tstep)
     const auto tot = coupling->totals(); // collective
     if (platform->comm.mpiRank() == 0) {
       printf("launch: step %d  t %.4e  x %.4e  v %.4f  a %.4e  Fm %.4e %.4e %.4e  F %.4e  Cd %.4f  a_f %.4e  slip %.3e"
-             "  drops %lld  stuck %lld  m_stuck %.3e  P_sap %.4e%s\n",
+             "  drops %lld  stuck %lld  m_stuck %.3e  P_sap %.4e  Fc %.4e  Fbr %.4e  a_c %.4e  a_tot %.4e%s\n",
              tstep, time, body.x[0], body.v[0], ax, fm[0], fm[1], fm[2], fx, cd, fx / (bodyRho * V), coupling->slipRms(),
-             tot.nEl, tot.nAttached, tot.attachedMass, tot.elMomentum[0], body.prescribed ? "" : "  free");
+             tot.nEl, tot.nAttached, tot.attachedMass, tot.elMomentum[0], fcn[0], fbr[0], fcn[0] / (bodyRho * V),
+             (fx + fcn[0]) / (bodyRho * V), body.prescribed ? "" : "  free");
       if (nrs->lastStep) {
         printf("launch: injected %.4e m3 of %.4e (main carry %.2f, satellite carry %.2f deferred)\n", injectedVolume, sapVolume, carryMain, carrySat);
       }

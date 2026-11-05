@@ -1209,6 +1209,33 @@ measured slowdown; the rest has to come from the tether to the vesicle, the
 sap mass the cap carries (the tracked blob is cap + sap), or the tracking
 itself.
 
+The a_f above is the fluid force alone: for a prescribed body the C++ step
+only read the hydrodynamic force into the report, and the contact impulses
+the parcels put on the body (spring-dashpot plus bridge, `rprop(JIX)` in
+`ppiclf_user_elibm.f`) were summed into `contactOnBody` only for a free body.
+Now the step sets `contactOnBody` and the new `bridgeOnBody` (bridge part
+alone, `elibm_bimp`, reduced in its own `MPI_Allreduce` so the body sums keep
+their reduction order) for fixed and prescribed bodies too, the EL–IBM
+impulse carries the parcel weight rnp like the EL–EL one (weight 1 in every
+case here), and `launch.udf` reports `Fc` (total contact force on the body),
+`Fbr` (its bridge part), `a_c = F_c/(ρ_b V)` and `a_tot = a_f + a_c`. The
+contact force on a prescribed body is by construction minus the sum of the
+impulses applied to the parcels in the same step (one MPI reduction of the
+per-parcel `rprop(JIX)` divided by dt). On the 8-rank smoke case
+(`build/sap_jet_smoke_b`, 80 µs) the jet still rams the accelerating cap,
+so a_c is +6 000…+9 000 m/s² (spring +400 µN, bridges −300 µN); the
+0.4–1.25 ms values need the 200 µm tuo reruns below.
+The free-body cases `el_ibm_collision`, `el_ibm_sphere_u10` and
+`el_ibm_bridge` (240/400/300 steps on 4/8/8 ranks) print bit-identical
+report lines before and after the change, except the last digit of the
+fluid momentum in `el_ibm_collision`, which two runs of the unmodified code
+also disagree on. The impulse weight is `wimp*(JVOLP/(π/6 dp*dp*dp))`, in
+the order `elibm.hpp` fills `JVOLP`, because gfortran's `dp**3` makes the
+existing `rnp` 1 ulp off 1 and that ulp grew to 0.5 % in the bouncing
+bridge case by step 300.
+`pilobolus_jet_compare.py` and `pilobolus_jet_vs_video_plot.py` read the new
+columns (a_c dotted, a_f + a_c dashed) and leave them nan on older logs.
+
 | window | bridges on: C_d, −a_f [m/s²], slip rms [m/s] | bridges off: C_d, −a_f, slip |
 |---|---|---|
 | 0.4–0.6 ms | 0.83, 313, 0.44 | 0.47, 177, 0.27 |

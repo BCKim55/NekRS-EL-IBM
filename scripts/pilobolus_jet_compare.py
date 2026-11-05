@@ -21,8 +21,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 LINE = re.compile(r"^launch: step (\d+)\s+t (\S+)\s+x (\S+)\s+v (\S+)\s+a (\S+)\s+Fm (\S+) (\S+) (\S+)\s+F (\S+)\s+Cd (\S+)"
-                  r"\s+a_f (\S+)\s+slip (\S+)\s+drops (\d+)\s+stuck (\d+)\s+m_stuck (\S+)\s+P_sap (\S+)")
-COLS = ["step", "t", "x", "v", "a", "fmx", "fmy", "fmz", "F", "Cd", "a_f", "slip", "drops", "stuck", "m_stuck", "P_sap"]
+                  r"\s+a_f (\S+)\s+slip (\S+)\s+drops (\d+)\s+stuck (\d+)\s+m_stuck (\S+)\s+P_sap (\S+)"
+                  r"(?:\s+Fc (\S+)\s+Fbr (\S+)\s+a_c (\S+)\s+a_tot (\S+))?")  # contact-force fields (newer logs)
+COLS = ["step", "t", "x", "v", "a", "fmx", "fmy", "fmz", "F", "Cd", "a_f", "slip", "drops", "stuck", "m_stuck", "P_sap",
+        "Fc", "Fbr", "a_c", "a_tot"]
 
 
 def read_log(d):
@@ -32,7 +34,7 @@ def read_log(d):
             for line in fh:
                 m = LINE.match(line)
                 if m:
-                    rows.append([float(g) for g in m.groups()])
+                    rows.append([float(g) if g is not None else np.nan for g in m.groups()])
     a = np.array(sorted(rows))
     return {c: a[:, i] for i, c in enumerate(COLS)}
 

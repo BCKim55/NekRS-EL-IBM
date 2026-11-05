@@ -26,3 +26,8 @@
 !     of mass 3R/8 in front of the sphere centre)
       integer*4 elibm_bshape(elibm_nbmax)
       common /elibm_body_i/ elibm_bshape
+!     RK-weighted impulse of the liquid-bridge part of the EL-IBM force
+!     on the parcels of this rank, per body, since BeginStep (the body's
+!     reaction is its negative; summed over ranks in elibm.hpp)
+      real*8 elibm_bimp(3,elibm_nbmax)
+      common /elibm_body_imp/ elibm_bimp

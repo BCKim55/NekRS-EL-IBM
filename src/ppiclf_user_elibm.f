@@ -171,6 +171,36 @@
             ppiclf_rprop(PPICLF_R_JIX-1+k,i) = 0.0d0
          enddo
       enddo
+      do i=1,elibm_nbmax
+         do k=1,3
+            elibm_bimp(k,i) = 0.0d0
+         enddo
+      enddo
+
+      return
+      end
+!-----------------------------------------------------------------------
+      subroutine ppiclc_elibm_GetBridgeImpulse(nb,bimp)
+     > bind(C, name="ppiclc_elibm_GetBridgeImpulse")
+!
+! This rank's share of the liquid-bridge impulse on the parcels, per
+! body (see elibm_bimp).
+!
+      implicit none
+!
+      include "PPICLF"
+      include "ELIBM.inc"
+!
+      integer*4 nb
+      real*8 bimp(3,*)
+!
+      integer*4 b, k
+!
+      do b=1,nb
+         do k=1,3
+            bimp(k,b) = elibm_bimp(k,b)
+         enddo
+      enddo
 
       return
       end
@@ -224,11 +254,11 @@
       end
 !-----------------------------------------------------------------------
       subroutine elibm_ContactForce(xi,vi,ri,rmi,xj,vj,rj,rmj,ib,
-     >                              ibr,f)
+     >                              ibr,f,fbr)
 !
-! Normal force on sphere i (centre xi, radius ri) from j: spring-dashpot
+! Normal force f on sphere i (centre xi, radius ri) from j: spring-dashpot
 ! in overlap, plus with ibr = 1 the pendular liquid-bridge attraction
-! (Willett et al. 2000)
+! (Willett et al. 2000), which is also returned on its own in fbr
 !   F = 2 pi sigma R cos(theta) / (1 + 1.05 S^ + 2.5 S^2),
 !   S^ = S/2 sqrt(R/V), R = 2 ri rj/(ri + rj), S = gap (0 in overlap),
 ! V = vbfrac x the smaller sphere's volume, acting up to the rupture
@@ -243,16 +273,18 @@
       include "PPICLF"
       include "ELIBM.inc"
 !
-      real*8 xi(3), vi(3), ri, rmi, xj(3), vj(3), rj, rmj, f(3)
+      real*8 xi(3), vi(3), ri, rmi, xj(3), vj(3), rj, rmj, f(3),
+     >       fbr(3)
       integer*4 ib, ibr
 !
       real*8 d(3), gsurf, delta, rn(3), vn, rmeff, eta, rpi2, rle,
      >       rpi, vb, srup, reff, sh, fcap
       integer*4 k
 !
-      f(1) = 0.0d0
-      f(2) = 0.0d0
-      f(3) = 0.0d0
+      do k=1,3
+         f(k)   = 0.0d0
+         fbr(k) = 0.0d0
+      enddo
 
       do k=1,3
          d(k) = xi(k) - xj(k)
@@ -281,6 +313,11 @@
          vn = vn + (vi(k) - vj(k))*rn(k)
       enddo
 
+      ! fbr written apart from f (and from a different expression tree) so
+      ! the compiler schedules f exactly as it did without fbr
+      do k=1,3
+         fbr(k) = -(fcap*rn(k))
+      enddo
       do k=1,3
          f(k) = -fcap*rn(k)
       enddo
@@ -386,7 +423,7 @@
       include "ELIBM.inc"
 !
       real*8 rpi, rmass, dp, ur(3), rep, fd, fb(3), fc(3), r(3),
-     >       ud(3), vol, wimp, rnp
+     >       ud(3), vol, wimp, rnp, wnp, fbr(3)
       integer*4 i, b, k
 !
       rpi = 4.0d0*atan(1.0d0)
@@ -430,6 +467,10 @@
          dp    = ppiclf_rprop(PPICLF_R_JDP,i)
          rmass = rpi/6.0d0*dp**3*ppiclf_rprop(PPICLF_R_JRHOP,i)
          rnp   = ppiclf_rprop(PPICLF_R_JVOLP,i)/(rpi/6.0d0*dp**3)
+         ! RK weight of the parcel's impulse on a body: dp*dp*dp in the
+         ! order elibm.hpp fills JVOLP gives exactly wimp for a weight-1
+         ! parcel (rnp above is 1 ulp off 1 and keeps the drag unchanged)
+         wnp   = wimp*(ppiclf_rprop(PPICLF_R_JVOLP,i)/(rpi/6.0d0*dp*dp*dp))
 
          ! stuck to a body: rigid motion, no drag, no body contact; a
          ! free particle pushing it (EL-EL contact) pushes the body, so
@@ -482,7 +523,7 @@
             call elibm_ContactForce(ppiclf_y(PPICLF_JX,i),
      >         ppiclf_y(PPICLF_JVX,i),0.5d0*dp,rmass,
      >         elibm_bx(1,b),elibm_bv(1,b),elibm_brad(b),
-     >         elibm_bmass(b),b,elibm_ibridge_ibm,fb)
+     >         elibm_bmass(b),b,elibm_ibridge_ibm,fb,fbr)
             if (elibm_iattach .eq. 1 .and.
      >          (fb(1).ne.0.0d0 .or. fb(2).ne.0.0d0 .or.
      >           fb(3).ne.0.0d0)) then
@@ -501,11 +542,14 @@
                enddo
                goto 100
             endif
+            ! the parcel's equation of motion is per droplet; the
+            ! impulse on the body is for all rnp of them
             do k=1,3
                ppiclf_rprop(PPICLF_R_JCX-1+k,i) =
      >            ppiclf_rprop(PPICLF_R_JCX-1+k,i) + fb(k)
                ppiclf_rprop(PPICLF_R_JIX-1+k,i) =
-     >            ppiclf_rprop(PPICLF_R_JIX-1+k,i) + wimp*fb(k)
+     >            ppiclf_rprop(PPICLF_R_JIX-1+k,i) + wnp*fb(k)
+               elibm_bimp(k,b) = elibm_bimp(k,b) + wnp*fbr(k)
             enddo
          enddo
 
@@ -634,7 +678,7 @@
       real*8 yi(PPICLF_LRS), rpropi(PPICLF_LRP)
       real*8 yj(PPICLF_LRS), rpropj(PPICLF_LRP)
 !
-      real*8 f(3), rmi, rmj, vi(3), vj(3)
+      real*8 f(3), fbr(3), rmi, rmj, vi(3), vj(3)
       integer*4 k
 !
       if (j .eq. 0) return
@@ -657,7 +701,7 @@
       call elibm_ContactForce(yi(PPICLF_JX),vi,
      >   0.5d0*rpropi(PPICLF_R_JDP),rmi,
      >   yj(PPICLF_JX),vj,0.5d0*rpropj(PPICLF_R_JDP),rmj,0,
-     >   elibm_ibridge_el,f)
+     >   elibm_ibridge_el,f,fbr)
 
       do k=1,3
          ppiclf_ydotc(PPICLF_JVX-1+k,i) =
