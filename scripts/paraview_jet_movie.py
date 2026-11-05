@@ -5,7 +5,7 @@ points (every snapshot), the hemisphere as its IBM markers.
 
     python3 scripts/snapshots_to_vtk.py <run>      # el.pvd / body.pvd
     pvpython scripts/paraview_jet_movie.py <run> [--out movie.mp4] [--umax 15]
-        [--window -5 1.5 -1.6 1.6] [--fps 12] [--title "bridges on"]
+        [--window -5 1.5 -1.6 1.6 | --lab -1 13 -2.5 2.5] [--fps 12] [--title "bridges on"]
 """
 import argparse
 import glob
@@ -19,6 +19,7 @@ ap.add_argument("run")
 ap.add_argument("--out", default=None)
 ap.add_argument("--umax", type=float, default=15.0)
 ap.add_argument("--window", type=float, nargs=4, default=[-5.0, 1.5, -1.6, 1.6], help="mm relative to the body: x0 x1 y0 y1")
+ap.add_argument("--lab", type=float, nargs=4, default=None, help="fixed lab-frame window in mm (x0 x1 y0 y1) instead of following the body")
 ap.add_argument("--fps", type=int, default=12)
 ap.add_argument("--title", default="")
 ap.add_argument("--size", type=int, nargs=2, default=[1300, 640])
@@ -90,7 +91,7 @@ td.FontSize = 22
 td.WindowLocation = "Upper Left Corner"
 view.CameraParallelProjection = 1
 view.CameraViewUp = [0, 1, 0]
-x0, x1, y0, y1 = [w * 1e-3 for w in a.window]
+x0, x1, y0, y1 = [w * 1e-3 for w in (a.lab if a.lab else a.window)]
 scale = 0.5 * (y1 - y0) * max(1.0, (x1 - x0) / (y1 - y0) * a.size[1] / a.size[0])
 
 scene = GetAnimationScene()
@@ -102,7 +103,7 @@ for i, t in enumerate(el.TimestepValues):
     nek.UpdatePipeline(tn)
     calc.UpdatePipeline(tn)
     xb = bx.get(t, min(bx, key=lambda k: abs(k - t)) and bx[min(bx, key=lambda k: abs(k - t))])
-    cx, cy = xb + 0.5 * (x0 + x1), 0.5 * (y0 + y1)
+    cx, cy = (0 if a.lab else xb) + 0.5 * (x0 + x1), 0.5 * (y0 + y1)
     view.CameraFocalPoint = [cx, cy, 0]
     view.CameraPosition = [cx, cy, 0.05]
     view.CameraParallelProjection = 1

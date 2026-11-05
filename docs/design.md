@@ -1183,7 +1183,7 @@ with the parcels, camera following the body).
 
 ![parcels, side and rear view](img/pilobolus_jet.gif)
 
-Movies: `img/pilobolus_jet_bridges.mp4`, `img/pilobolus_jet_nobridges.mp4`.
+Movies: `img/pilobolus_jet_bridges.mp4`, `img/pilobolus_jet_nobridges.mp4` (camera following the body) and `*_lab.mp4` (fixed lab frame, the body flies across).
 
 | window | bridges on: C_d, −a_f [m/s²], slip rms [m/s] | bridges off: C_d, −a_f, slip |
 |---|---|---|
