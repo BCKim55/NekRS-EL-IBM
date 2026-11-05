@@ -1,9 +1,9 @@
 #!/usr/bin/env pvpython
 """Side-view movie of a pilobolus sap-jet run, camera following the body:
 z = 0 slice coloured by |u| (nearest earlier checkpoint), EL parcels as black
-points (every snapshot), the hemisphere as its IBM markers.
+points (every snapshot), the hemisphere as a solid surface (body_surf.pvd).
 
-    python3 scripts/snapshots_to_vtk.py <run>      # el.pvd / body.pvd
+    python3 scripts/snapshots_to_vtk.py <run> --body-surface   # el.pvd / body_surf.pvd
     pvpython scripts/paraview_jet_movie.py <run> [--out movie.mp4] [--umax 15]
         [--window -5 1.5 -1.6 1.6 | --lab -1 13 -2.5 2.5] [--fps 12] [--title "bridges on"]
 """
@@ -35,7 +35,9 @@ for f in glob.glob(os.path.join(frames, "*.png")):
 nek = OpenDataFile(glob.glob(os.path.join(run, "*.nek5000"))[0])
 nek.PointArrays = ["velocity"]
 el = OpenDataFile(os.path.join(snap, "el.pvd"))
-body = OpenDataFile(os.path.join(snap, "body.pvd"))
+# solid hemisphere from snapshots_to_vtk.py --body-surface; body.pvd alone is one centre point (invisible)
+surf = os.path.join(snap, "body_surf.pvd")
+body = OpenDataFile(surf if os.path.exists(surf) else os.path.join(snap, "body.pvd"))
 bodyT = el.TimestepValues  # body.csv has the same steps
 # body x(t) from body.csv: step, t, x, ...
 import csv
@@ -79,7 +81,7 @@ e.AmbientColor = [0, 0, 0]
 e.DiffuseColor = [0, 0, 0]
 e.PointSize = 2.5
 b = Show(body, view)
-b.SetRepresentationType("Points")
+b.SetRepresentationType("Surface" if os.path.exists(surf) else "Points")
 b.ColorArrayName = ["POINTS", ""]
 b.AmbientColor = [0.85, 0.25, 0.1]
 b.DiffuseColor = [0.85, 0.25, 0.1]

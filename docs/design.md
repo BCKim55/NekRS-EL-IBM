@@ -1176,7 +1176,8 @@ Box 15 × 14 × 14 mm (x −2..13), 75 × 14 × 14 elements of 0.2 mm, N 5, dt
 only in `bridge_el`/`bridge_ibm` (1/1 vs 0/0). Projection FWHM 100 µm; the
 no-bridge run blew up at step 1 200 (0.96 ms, see below) so its comparison
 stops there. Post-processing: `scripts/pilobolus_jet_compare.py` (figure and
-parcel gif), `scripts/paraview_jet_movie.py` (velocity-magnitude midplane
+parcel gif), `scripts/snapshots_to_vtk.py --body-surface` (solid hemisphere from the
+body centre and axis; `body.pvd` alone is one point), `scripts/paraview_jet_movie.py` (velocity-magnitude midplane
 with the parcels, camera following the body).
 
 ![bridges on vs off](img/pilobolus_jet_compare.png)
