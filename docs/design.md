@@ -1193,6 +1193,20 @@ Movies: `img/pilobolus_jet_bridges.mp4`, `img/pilobolus_jet_nobridges.mp4` (came
 the tracked centroid at 0.7 ms; the white band left of −2 mm is outside the
 fluid box.
 
+![Video S3 vs runs](img/pilobolus_jet_vs_videoS3.png)
+
+`scripts/pilobolus_jet_vs_video_plot.py` puts the tracking (`trajectory.csv`)
+against the two runs. Position and speed agree by construction (the runs
+prescribe the tracked speed; the 0.25 mm start offset is removed). The
+acceleration panel is the physics: from 0.4 ms on the tracking decelerates by
+1 470 m/s² on average (per-frame values swing ±2 500 m/s² at a 0.3 ms period,
+tracking noise at 65 µm/px), while the fluid force on the body in the runs
+gives −269 m/s² with bridges and −176 m/s² without, 18 % and 12 % of the
+measured value. Air plus the sap's drag on the cap do not explain the
+measured slowdown; the rest has to come from the tether to the vesicle, the
+sap mass the cap carries (the tracked blob is cap + sap), or the tracking
+itself.
+
 | window | bridges on: C_d, −a_f [m/s²], slip rms [m/s] | bridges off: C_d, −a_f, slip |
 |---|---|---|
 | 0.4–0.6 ms | 0.83, 313, 0.44 | 0.47, 177, 0.27 |
