@@ -1164,3 +1164,59 @@ conclusion of 7.4 and 7.11: with the fluid force alone the body would still
 be at 8.4–8.5 m/s at 1.2 ms against the measured 6.9 (20 px/mm) or 9.0
 (15.3 px/mm) from a correspondingly higher launch speed; the measured
 deceleration is 6.6× (hemisphere) to 10.7× (sphere) what the air supplies.
+
+### 7.12 Continuous sap jet on Tuolumne: liquid bridges on vs off (`cases/pilobolus_launch/sap_jet_tuo`, `sap_jet_tuo_nobridge`)
+
+The 7.11 setup at the Fischer et al. 2010 size (d 282 µm, 16.13 µg, hemisphere
+of the same frontal width, prescribed Video S3 speed at 15.3 px/mm) with the
+40 nL of sap injected as a continuous jet: 4 889 parcels of 25 µm packed
+without overlap in a 100 µm disc at the body's rear, 15 m/s, until 0.34 ms.
+Box 15 × 14 × 14 mm (x −2..13), 75 × 14 × 14 elements of 0.2 mm, N 5, dt
+0.8 µs, 1 563 steps to 1.25 ms, 4 MI300A GPUs (one node). The two runs differ
+only in `bridge_el`/`bridge_ibm` (1/1 vs 0/0). Projection FWHM 100 µm; the
+no-bridge run blew up at step 1 200 (0.96 ms, see below) so its comparison
+stops there. Post-processing: `scripts/pilobolus_jet_compare.py` (figure and
+parcel gif), `scripts/paraview_jet_movie.py` (velocity-magnitude midplane
+with the parcels, camera following the body).
+
+![bridges on vs off](img/pilobolus_jet_compare.png)
+
+![parcels, side and rear view](img/pilobolus_jet.gif)
+
+Movies: `img/pilobolus_jet_bridges.mp4`, `img/pilobolus_jet_nobridges.mp4`.
+
+| window | bridges on: C_d, −a_f [m/s²], slip rms [m/s] | bridges off: C_d, −a_f, slip |
+|---|---|---|
+| 0.4–0.6 ms | 0.83, 313, 0.44 | 0.47, 177, 0.27 |
+| 0.6–0.96 ms | 0.77, 259, 0.37 | 0.52, 175, 0.23 |
+| 0.96–1.25 ms | 0.78, 241, 0.35 | (unstable) |
+
+What the two runs show:
+
+- With bridges the sap stays a coherent thread 0.1 mm thick and up to 2.5 mm
+  long behind the body (the jet is faster than the body, so it folds up
+  against the rear face and is held there by the bridges). Without bridges
+  the parcels bounce off the rear face (restitution 0.05, so they stop in the
+  body frame) and spread into a cloud of ±1.5 mm around the body; some pass
+  it on the sides.
+- The fluid force on the sporangium itself is 1.6× larger with the bridges
+  (C_d 0.8 vs 0.5). Without bridges the cloud of 4 900 parcels drags the air
+  around the body forward at the body speed (the slip rms is lower), which
+  recovers the base pressure; the compact thread leaves the wake alone. Both
+  are far below the measured 1 592 m/s² deceleration, as in 7.4 and 7.11.
+- The sap carries 530 µg m/s of momentum at the end of injection, 3.7× the
+  sporangium's 145 µg m/s: the jet, not the cap, holds most of the launch
+  momentum, and where it ends up (tether, satellites) decides the range.
+- No-bridge instability: the CFL rose from 0.58 at step 1 120 to 0.69 at
+  1 177 and then doubled every 5 steps. The parcels were fine (max 15.2 m/s,
+  no contact spikes); the fluid blew up where up to 30 parcels sat in one
+  (100 µm)³ behind the body (1 157 within 0.2 mm). The drag reaction on the
+  air, −K (u_f − u_p), is an explicit extrapolated source in nekRS, and with
+  the parcel mass 200× the air mass of the cell and FWHM 100 µm its
+  K dt / m_air reached ~0.1–0.2, the EXT stability edge. Remedy (commit
+  307d1df): `filter_width` 2.0e-4 in both cases (the margin scales with
+  FWHM³, and the GLL spacing of 23–57 µm resolved a 100 µm Gaussian with two
+  points anyway). The 200 µm reruns are the reference pair; the 100 µm
+  bridge run stays as the filter-sensitivity check.
+- Speed: 1.5–1.9 s/step with 4 900 parcels after patch 0007 (8 s before),
+  32 min for the whole run on one node.
