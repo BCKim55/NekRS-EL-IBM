@@ -1188,8 +1188,10 @@ Movies: `img/pilobolus_jet_bridges.mp4`, `img/pilobolus_jet_nobridges.mp4` (came
 `img/pilobolus_jet_vs_videoS3.mp4` stacks the Video S3 tracking panel
 (Yafetto et al. 2008, CC BY; x −4…12.5 mm, y −1…3 mm about the launch point,
 20 µs per frame) over both simulations rendered in the same lab window
-(`paraview_jet_movie.py --lab -4 12.5 -1 3 --size 1268 316`, then
-`scripts/pilobolus_jet_vs_video.py`). The simulated body runs 0.3 mm ahead of
+(`paraview_jet_movie.py --lab -4 12.5 -1 3 --size 1268 316 --sync --legend left
+--cmap white-blue`, then `scripts/pilobolus_jet_vs_video.py`). `--sync` draws one
+frame per fluid checkpoint (80 µs) so parcels, body and velocity field are at
+the same time; the no-bridge run holds its last frame after 0.96 ms. The simulated body runs 0.3 mm ahead of
 the tracked centroid at 0.7 ms; the white band left of −2 mm is outside the
 fluid box.
 

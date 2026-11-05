@@ -20,6 +20,9 @@ ap.add_argument("--out", default=None)
 ap.add_argument("--umax", type=float, default=15.0)
 ap.add_argument("--window", type=float, nargs=4, default=[-5.0, 1.5, -1.6, 1.6], help="mm relative to the body: x0 x1 y0 y1")
 ap.add_argument("--lab", type=float, nargs=4, default=None, help="fixed lab-frame window in mm (x0 x1 y0 y1) instead of following the body")
+ap.add_argument("--sync", action="store_true", help="frames only at the fluid checkpoint times (parcels and body at the same time)")
+ap.add_argument("--legend", default="right", choices=["right", "left"])
+ap.add_argument("--cmap", default="viridis", choices=["viridis", "white-blue", "white-red"])
 ap.add_argument("--fps", type=int, default=12)
 ap.add_argument("--title", default="")
 ap.add_argument("--size", type=int, nargs=2, default=[1300, 640])
@@ -62,16 +65,22 @@ calc = Calculator(Input=sl)
 calc.ResultArrayName = "umag"
 calc.Function = "mag(velocity)"
 d = Show(calc, view)
+d.Ambient, d.Diffuse = 1.0, 0.0  # unshaded: white stays white
 ColorBy(d, ("POINTS", "umag"))
 lut = GetColorTransferFunction("umag")
-lut.ApplyPreset("Viridis (matplotlib)", True)
+if a.cmap == "viridis":
+    lut.ApplyPreset("Viridis (matplotlib)", True)
+else:
+    hi = [0.05, 0.2, 0.65] if a.cmap == "white-blue" else [0.7, 0.05, 0.05]
+    lut.RGBPoints = [0.0, 1, 1, 1, 0.5 * a.umax] + [0.5 * (1 + c) for c in hi] + [a.umax] + hi
+    lut.ColorSpace = "Lab"
 lut.RescaleTransferFunction(0.0, a.umax)
 bar = GetScalarBar(lut, view)
 bar.Title = "|u|  [m/s]"
 bar.ComponentTitle = ""
 bar.TitleColor = [0, 0, 0]
 bar.LabelColor = [0, 0, 0]
-bar.WindowLocation = "Lower Right Corner"
+bar.WindowLocation = "Lower %s Corner" % a.legend.capitalize()
 bar.ScalarBarLength = 0.3
 d.SetScalarBarVisibility(view, True)
 e = Show(el, view)
@@ -99,7 +108,9 @@ scale = 0.5 * (y1 - y0) * max(1.0, (x1 - x0) / (y1 - y0) * a.size[1] / a.size[0]
 scene = GetAnimationScene()
 scene.UpdateAnimationUsingDataTimeSteps()
 nekT = list(nek.TimestepValues)
-for i, t in enumerate(el.TimestepValues):
+elT = list(el.TimestepValues)
+times = [min(elT, key=lambda s: abs(s - tn)) for tn in nekT] if a.sync else elT
+for i, t in enumerate(times):
     scene.AnimationTime = t
     tn = max([s for s in nekT if s <= t + 1e-12] or [nekT[0]])
     nek.UpdatePipeline(tn)
@@ -113,6 +124,8 @@ for i, t in enumerate(el.TimestepValues):
     txt.Text = "%s   t = %.3f ms   x_body = %.2f mm   fluid at t = %.2f ms" % (a.title, t * 1e3, xb * 1e3, tn * 1e3)
     Render(view)
     SaveScreenshot(os.path.join(frames, "f_%04d.png" % i), view, ImageResolution=a.size)
+with open(os.path.join(frames, "times.txt"), "w") as fh:
+    fh.write("".join("%.6e\n" % t for t in times))
 print("frames:", i + 1)
 subprocess.check_call(["ffmpeg", "-y", "-loglevel", "error", "-framerate", str(a.fps), "-i", os.path.join(frames, "f_%04d.png"),
                        "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20", out])
