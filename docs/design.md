@@ -1185,6 +1185,13 @@ with the parcels, camera following the body).
 ![parcels, side and rear view](img/pilobolus_jet.gif)
 
 Movies: `img/pilobolus_jet_bridges.mp4`, `img/pilobolus_jet_nobridges.mp4` (camera following the body) and `*_lab.mp4` (fixed lab frame, the body flies across).
+`img/pilobolus_jet_vs_videoS3.mp4` stacks the Video S3 tracking panel
+(Yafetto et al. 2008, CC BY; x −4…12.5 mm, y −1…3 mm about the launch point,
+20 µs per frame) over both simulations rendered in the same lab window
+(`paraview_jet_movie.py --lab -4 12.5 -1 3 --size 1268 316`, then
+`scripts/pilobolus_jet_vs_video.py`). The simulated body runs 0.3 mm ahead of
+the tracked centroid at 0.7 ms; the white band left of −2 mm is outside the
+fluid box.
 
 | window | bridges on: C_d, −a_f [m/s²], slip rms [m/s] | bridges off: C_d, −a_f, slip |
 |---|---|---|
