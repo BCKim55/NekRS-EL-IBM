@@ -102,6 +102,7 @@ td.FontSize = 22
 td.WindowLocation = "Upper Left Corner"
 view.CameraParallelProjection = 1
 view.CameraViewUp = [0, 1, 0]
+Render(view)  # the first Render resets the camera to the data; do it before the per-frame camera is set
 x0, x1, y0, y1 = [w * 1e-3 for w in (a.lab if a.lab else a.window)]
 scale = 0.5 * (y1 - y0) * max(1.0, (x1 - x0) / (y1 - y0) * a.size[1] / a.size[0])
 
