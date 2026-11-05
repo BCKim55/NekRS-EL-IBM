@@ -54,8 +54,10 @@ trajectory = "trajectory_15p3.csv"
 # IBM interface: markers ~ 0.6 x the band's mean GLL spacing, FWHM 2 x that
 marker_spacing = 2.5e-5
 filter_width_ibm = 5e-5
-# EL projection FWHM: 2.5 GLL spacings (the 100 um jet is resolved as a smooth source)
-filter_width = 1.0e-4
+# EL projection FWHM: 4-5 GLL spacings. 1.0e-4 went unstable (CFL blow-up at
+# step 1200 without bridges): up to 30 parcels per (100 um)^3 behind the body
+# make the explicit drag reaction stiff; the margin scales with FWHM^3.
+filter_width = 2.0e-4
 # sap as a continuous jet: 40 nL (video: 10-50 nL; the sap disc appears at 0.34 ms)
 # of 25 um parcels (jet d / 4, ~4 900 parcels) injected at the volume flux of a
 # 100 um jet at 15 m/s: t_inj = V / (pi r_n^2 v_jet) = 0.34 ms. jet d 100 um:
