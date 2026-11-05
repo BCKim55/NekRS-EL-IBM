@@ -1,0 +1,332 @@
+diff -ru a/source/PPICLC.h b/source/PPICLC.h
+--- a/source/PPICLC.h	2026-11-04 23:23:44
++++ b/source/PPICLC.h	2026-11-04 23:25:48
+@@ -34,6 +34,7 @@
+                                           double *alpha  , 
+ 					  int    *ngrid  );
+     void ppiclc_solve_InitParticleFilter (int    *jfilt  );
++    void ppiclc_solve_SetProjStep        (int    *iflag  );
+     void ppiclc_solve_InitBoxFilter      (double *filt   , 
+                                           int    *ngrid  );
+     void ppiclc_solve_InitParticle       (int    *imethod, 
+diff -ru a/source/PPICLF_OPT.h b/source/PPICLF_OPT.h
+--- a/source/PPICLF_OPT.h	2026-11-04 23:23:44
++++ b/source/PPICLF_OPT.h	2026-11-04 23:25:48
+@@ -5,12 +5,14 @@
+      >       ,PPICLF_LINIT, PPICLF_LFILT, PPICLF_LINTP, PPICLF_LPROJ
+      >       ,PPICLF_LSUBBIN, PPICLF_LSUBSUBBIN
+      >       ,PPICLF_LFILTGAUSS, PPICLF_LFILTBOX
++     >       ,PPICLF_LPROJ_STEP, PPICLF_LPROJ_NOW
+       COMMON /PPICLF_OPT_PARAM_L/ PPICLF_RESTART, PPICLF_OVERLAP
+      >                           ,PPICLF_LCOMM, PPICLF_LINIT
+      >                           ,PPICLF_LFILT, PPICLF_LINTP
+      >                           ,PPICLF_LPROJ, PPICLF_LSUBBIN
+      >                           ,PPICLF_LSUBSUBBIN
+      >                           ,PPICLF_LFILTGAUSS, PPICLF_LFILTBOX
++     >                           ,PPICLF_LPROJ_STEP, PPICLF_LPROJ_NOW
+       DATA PPICLF_LCOMM /.false./
+       DATA PPICLF_RESTART /.false./
+ 
+diff -ru a/source/PPICLF_PARALLEL.h b/source/PPICLF_PARALLEL.h
+--- a/source/PPICLF_PARALLEL.h	2026-10-16 14:01:01
++++ b/source/PPICLF_PARALLEL.h	2026-11-04 23:26:35
+@@ -48,6 +48,17 @@
+      >         ,PPICLF_NB_G(3,PPICLF_LPART_GP)
+       COMMON /PPICLF_PARALLEL_NEIGHBOR_I/ PPICLF_NB_R, PPICLF_NB_G
+ 
++C Cell list of the neighbor sub-bins: particle and ghost indices sorted
++C by the linear sub-bin key, so a neighbor search visits 27 cells
++      INTEGER*8 PPICLF_CL_KEY(PPICLF_LPART)
++     >         ,PPICLF_CL_KEY_GP(PPICLF_LPART_GP)
++     >         ,PPICLF_CL_STRIDE(3)
++      INTEGER*4 PPICLF_CL_IDX(PPICLF_LPART)
++     >         ,PPICLF_CL_IDX_GP(PPICLF_LPART_GP)
++      COMMON /PPICLF_PARALLEL_CELLLIST/ PPICLF_CL_KEY, PPICLF_CL_KEY_GP
++     >                                 ,PPICLF_CL_STRIDE
++     >                                 ,PPICLF_CL_IDX, PPICLF_CL_IDX_GP
++
+       INTEGER*4 PPICLF_IPROP_GP(PPICLF_LIP_GP,PPICLF_LPART_GP)
+       COMMON /PPICLF_PARALLEL_GHOST_I/ PPICLF_IPROP_GP
+ 
+diff -ru a/source/ppiclf_solve.f b/source/ppiclf_solve.f
+--- a/source/ppiclf_solve.f	2026-11-04 23:23:44
++++ b/source/ppiclf_solve.f	2026-11-04 23:26:35
+@@ -172,6 +172,8 @@
+       ppiclf_lsubsubbin = .false.
+       if (PPICLF_INTERP .eq. 1)  ppiclf_lintp = .true.
+       if (PPICLF_PROJECT .eq. 1) ppiclf_lproj = .true.
++      ppiclf_lproj_step = .true.
++      ppiclf_lproj_now  = .true.
+ 
+       ppiclf_xdrange(1,1) = -1E20
+       ppiclf_xdrange(2,1) =  1E20
+@@ -285,7 +287,9 @@
+ !
+ ! Internal:
+ !
+-      integer*4 i
++      integer*4 i, k
++      integer*8 n(3), ppiclf_solve_CellKey
++      external  ppiclf_solve_CellKey
+ !
+       do i=1,ppiclf_npart
+          ppiclf_nb_r(1,i) = floor((ppiclf_cp_map(1,i)-ppiclf_binb(1))/
+@@ -309,9 +313,135 @@
+      >                             ppiclf_d2chk(3))
+       enddo
+ 
++      ! cell list: sub-bin indices -> one integer*8 key (strides from
++      ! the bin extent plus a margin for ghosts and periodic images),
++      ! then the
++      ! particle and ghost index arrays sorted by key
++      do k=1,3
++         n(k) = int((ppiclf_binb(2*k)-ppiclf_binb(2*k-1))
++     >             /ppiclf_d2chk(3),8) + 64
++      enddo
++      ppiclf_cl_stride(1) = 1
++      ppiclf_cl_stride(2) = n(1)
++      ppiclf_cl_stride(3) = n(1)*n(2)
++      do i=1,ppiclf_npart
++         ppiclf_cl_key(i) = ppiclf_solve_CellKey(ppiclf_nb_r(1,i))
++         ppiclf_cl_idx(i) = i
++      enddo
++      call ppiclf_solve_CellSort(ppiclf_npart,ppiclf_cl_key,
++     >                           ppiclf_cl_idx)
++      do i=1,ppiclf_npart_gp
++         ppiclf_cl_key_gp(i) = ppiclf_solve_CellKey(ppiclf_nb_g(1,i))
++         ppiclf_cl_idx_gp(i) = i
++      enddo
++      call ppiclf_solve_CellSort(ppiclf_npart_gp,ppiclf_cl_key_gp,
++     >                           ppiclf_cl_idx_gp)
++
+       return
+       end
+ !-----------------------------------------------------------------------
++      integer*8 function ppiclf_solve_CellKey(nb)
++!
++      implicit none
++!
++      include "PPICLF"
++!
++      integer*4 nb(3)
++!
++      ppiclf_solve_CellKey = (int(nb(1),8)+32)*ppiclf_cl_stride(1)
++     >                     + (int(nb(2),8)+32)*ppiclf_cl_stride(2)
++     >                     + (int(nb(3),8)+32)*ppiclf_cl_stride(3)
++      return
++      end
++!-----------------------------------------------------------------------
++      subroutine ppiclf_solve_CellSort(n,key,idx)
++!
++! heap sort of key(1:n) with idx permuted alongside
++!
++      implicit none
++!
++      integer*4 n, idx(*)
++      integer*8 key(*)
++      integer*4 i, j, k, it
++      integer*8 kt
++!
++      if (n .lt. 2) return
++      do i=n/2,1,-1
++         call ppiclf_solve_CellSift(key,idx,i,n)
++      enddo
++      do i=n,2,-1
++         kt = key(1)
++         key(1) = key(i)
++         key(i) = kt
++         it = idx(1)
++         idx(1) = idx(i)
++         idx(i) = it
++         call ppiclf_solve_CellSift(key,idx,1,i-1)
++      enddo
++      return
++      end
++!-----------------------------------------------------------------------
++      subroutine ppiclf_solve_CellSift(key,idx,istart,iend)
++!
++      implicit none
++!
++      integer*4 idx(*), istart, iend
++      integer*8 key(*)
++      integer*4 iroot, ichild, it
++      integer*8 kt
++!
++      iroot = istart
++      do while (2*iroot .le. iend)
++         ichild = 2*iroot
++         if (ichild .lt. iend) then
++            if (key(ichild+1) .gt. key(ichild)) ichild = ichild + 1
++         endif
++         if (key(iroot) .ge. key(ichild)) return
++         kt = key(iroot)
++         key(iroot) = key(ichild)
++         key(ichild) = kt
++         it = idx(iroot)
++         idx(iroot) = idx(ichild)
++         idx(ichild) = it
++         iroot = ichild
++      enddo
++      return
++      end
++!-----------------------------------------------------------------------
++      subroutine ppiclf_solve_CellRange(n,key,k,i1,i2)
++!
++! first and last position of key k in sorted key(1:n) (i1 > i2: none)
++!
++      implicit none
++!
++      integer*4 n, i1, i2
++      integer*8 key(*), k
++      integer*4 lo, hi, mid
++!
++      lo = 1
++      hi = n + 1
++      do while (lo .lt. hi)
++         mid = (lo + hi)/2
++         if (key(mid) .lt. k) then
++            lo = mid + 1
++         else
++            hi = mid
++         endif
++      enddo
++      i1 = lo
++      hi = n + 1
++      do while (lo .lt. hi)
++         mid = (lo + hi)/2
++         if (key(mid) .le. k) then
++            lo = mid + 1
++         else
++            hi = mid
++         endif
++      enddo
++      i2 = lo - 1
++      return
++      end
++!-----------------------------------------------------------------------
+       subroutine ppiclf_solve_InitZero
+ !
+       implicit none
+@@ -367,6 +497,9 @@
+      >       rflip, a_sum, rd, rdist, theta, tri_area, rthresh,
+      >       ab_dot_ac, ab_mag, ac_mag, zdist2
+       integer*4 istride, k, kmax, kp, kkp, kk
++      integer*4 ii, jj, ic, ic1, ic2, nb(3)
++      integer*8 ckey, ppiclf_solve_CellKey
++      external  ppiclf_solve_CellKey
+ ! 
+       i_iim = ppiclf_nb_r(1,i) - 1
+       i_iip = ppiclf_nb_r(1,i) + 1
+@@ -377,19 +510,23 @@
+ 
+       dist2 = ppiclf_d2chk(3)**2
+ 
+-      do j=1,ppiclf_npart
++      ! neighbors through the cell list: the 27 sub-bins around i
++      nb(3) = 0
++      do kk=-1,1
++      if (ppiclf_ndim .eq. 2 .and. kk .ne. 0) cycle
++      do jj=-1,1
++      do ii=-1,1
++         nb(1) = ppiclf_nb_r(1,i) + ii
++         nb(2) = ppiclf_nb_r(2,i) + jj
++         if (ppiclf_ndim .eq. 3) nb(3) = ppiclf_nb_r(3,i) + kk
++         ckey = ppiclf_solve_CellKey(nb)
++
++         call ppiclf_solve_CellRange(ppiclf_npart,ppiclf_cl_key,ckey,
++     >                               ic1,ic2)
++         do ic=ic1,ic2
++         j = ppiclf_cl_idx(ic)
+          if (j .eq. i) cycle
+ 
+-         j_ii = ppiclf_nb_r(1,j)
+-         j_jj = ppiclf_nb_r(2,j)
+-         j_kk = ppiclf_nb_r(3,j)
+-
+-         if (j_ii .gt. i_iip .or. j_ii .lt. i_iim) cycle
+-         if (j_jj .gt. i_jjp .or. j_jj .lt. i_jjm) cycle
+-         if (ppiclf_ndim .eq. 3) then
+-         if (j_kk .gt. i_kkp .or. j_kk .lt. i_kkm) cycle
+-         endif
+-
+          xdist2 = (ppiclf_cp_map(1,i)-ppiclf_cp_map(1,j))**2
+          if (xdist2 .gt. dist2) cycle
+          ydist2 = (ppiclf_cp_map(2,i)-ppiclf_cp_map(2,j))**2
+@@ -406,20 +543,13 @@
+      >                                 ,ppiclf_cp_map(1+PPICLF_LRS,i)
+      >                                 ,ppiclf_cp_map(1,j)
+      >                                 ,ppiclf_cp_map(1+PPICLF_LRS,j))
++         enddo
+ 
+-      enddo
++         call ppiclf_solve_CellRange(ppiclf_npart_gp,ppiclf_cl_key_gp,
++     >                               ckey,ic1,ic2)
++         do ic=ic1,ic2
++         j = ppiclf_cl_idx_gp(ic)
+ 
+-      do j=1,ppiclf_npart_gp
+-         j_ii = ppiclf_nb_g(1,j)
+-         j_jj = ppiclf_nb_g(2,j)
+-         j_kk = ppiclf_nb_g(3,j)
+-
+-         if (j_ii .gt. i_iip .or. j_ii .lt. i_iim) cycle
+-         if (j_jj .gt. i_jjp .or. j_jj .lt. i_jjm) cycle
+-         if (ppiclf_ndim .eq. 3) then
+-         if (j_kk .gt. i_kkp .or. j_kk .lt. i_kkm) cycle
+-         endif
+-
+          xdist2 = (ppiclf_cp_map(1,i)-ppiclf_rprop_gp(1,j))**2
+          if (xdist2 .gt. dist2) cycle
+          ydist2 = (ppiclf_cp_map(2,i)-ppiclf_rprop_gp(2,j))**2
+@@ -437,8 +567,10 @@
+      >                                 ,ppiclf_cp_map(1+PPICLF_LRS,i)
+      >                                 ,ppiclf_rprop_gp(1,j)
+      >                                 ,ppiclf_rprop_gp(1+PPICLF_LRS,j))
+-
++         enddo
+       enddo
++      enddo
++      enddo
+ 
+       istride = ppiclf_ndim
+       do j=1,ppiclf_nwall
+@@ -1059,6 +1191,9 @@
+       nstage = 3
+       do istage=1,nstage
+ 
++         ! project on the last stage only unless every stage is wanted
++         ppiclf_lproj_now = ppiclf_lproj_step .and. istage .eq. nstage
++
+          ! evaluate ydot
+          call ppiclf_solve_SetYdot
+ 
+@@ -1107,6 +1242,7 @@
+       if (istage .eq. 0) istage = 3
+       iout = .false.
+       if (istage .eq. nstage) iout = .true.
++      ppiclf_lproj_now = ppiclf_lproj_step .and. istage .eq. nstage
+ 
+       ! save stage 1 solution
+       if (istage .eq. 1) then
+@@ -1156,7 +1292,11 @@
+       call ppiclf_comm_CreateBin
+       call ppiclf_comm_FindParticle
+       call ppiclf_comm_MoveParticle
+-      if (ppiclf_overlap) 
++      ! the overlap-mesh map serves interpolation and projection only:
++      ! skip it (and the projection) on the RK stages whose projection
++      ! nobody reads (ppiclf_lproj_now, set per stage by the integrator)
++      if (ppiclf_overlap .and. (ppiclf_lproj_now .or.
++     >    (ppiclf_lintp .and. ppiclf_int_icnt .ne. 0)))
+      >   call ppiclf_comm_MapOverlapMesh
+       if (ppiclf_lintp .and. ppiclf_int_icnt .ne. 0) 
+      >   call ppiclf_solve_InterpParticleGrid
+@@ -1167,7 +1307,7 @@
+          call ppiclf_comm_MoveGhost
+       endif
+ 
+-      if (ppiclf_lproj .and. ppiclf_overlap) 
++      if (ppiclf_lproj .and. ppiclf_overlap .and. ppiclf_lproj_now) 
+      >   call ppiclf_solve_ProjectParticleGrid
+       if (ppiclf_lsubsubbin) 
+      >   call ppiclf_solve_SetNeighborBin

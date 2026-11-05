@@ -139,6 +139,7 @@ struct Config {
     return (1 + 0.5 * contactAngle) * std::cbrt(bridgeVolumeFraction * M_PI / 6 * dp * dp * dp);
   }
   int substeps = 1;
+  bool interpEverySubstep = false; // re-interpolate the (frozen) fluid velocity at every substep, not only the first and last
   int ioStep = 0; // ppiclF VTU interval in fluid steps (0: none)
   bool twoWay = true; // false: particles feel the fluid, the fluid not the particles
   bool qtl = true;
@@ -447,10 +448,19 @@ public:
     // 1. particles
     ppiclc_elibm_BeginStep();
     double dts = dt / cfg.substeps;
+    // the fluid is frozen over the step: interpolate it to the particles
+    // on the first and the last substep only (the first RK stage of the
+    // substep consumes the queued fields; the last one gives the markers
+    // the fluid velocity at their final position, as before) and project
+    // the particles back once, on the last stage of the last substep
     for (int s = 0; s < cfg.substeps; s++) {
-      ppiclf::interpField(mesh, PPICLF_R_JUX, fluid->o_U.slice(0 * fluid->fieldOffset, mesh->Nlocal));
-      ppiclf::interpField(mesh, PPICLF_R_JUY, fluid->o_U.slice(1 * fluid->fieldOffset, mesh->Nlocal));
-      ppiclf::interpField(mesh, PPICLF_R_JUZ, fluid->o_U.slice(2 * fluid->fieldOffset, mesh->Nlocal));
+      if (cfg.interpEverySubstep || s == 0 || s == cfg.substeps - 1) {
+        ppiclf::interpField(mesh, PPICLF_R_JUX, fluid->o_U.slice(0 * fluid->fieldOffset, mesh->Nlocal));
+        ppiclf::interpField(mesh, PPICLF_R_JUY, fluid->o_U.slice(1 * fluid->fieldOffset, mesh->Nlocal));
+        ppiclf::interpField(mesh, PPICLF_R_JUZ, fluid->o_U.slice(2 * fluid->fieldOffset, mesh->Nlocal));
+      }
+      int proj = (s == cfg.substeps - 1) ? 1 : 0;
+      ppiclc_solve_SetProjStep(&proj);
 
       // ppiclF writes when mod(istep, iostep) == 0
       const bool out = (s == cfg.substeps - 1) && cfg.ioStep > 0;

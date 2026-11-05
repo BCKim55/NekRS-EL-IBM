@@ -112,6 +112,17 @@
       return
       end
 !-----------------------------------------------------------------------
+      subroutine ppiclc_solve_SetProjStep(iflag)
+     > bind(C, name="ppiclc_solve_SetProjStep")
+      ! 1: project on the last RK stage of the next IntegrateParticle
+      ! call, 0: no projection in it (the fluid reads the last one)
+      implicit none
+      include "PPICLF"
+      integer*4 iflag
+      ppiclf_lproj_step = iflag .ne. 0
+      return
+      end
+!-----------------------------------------------------------------------
       subroutine ppiclc_solve_InitBoxFilter(filt,iwallm)
      > bind(C, name="ppiclc_solve_InitBoxFilter")
       implicit none
