@@ -1228,8 +1228,10 @@ so a_c is +6 000…+9 000 m/s² (spring +400 µN, bridges −300 µN); the
 The free-body cases `el_ibm_collision`, `el_ibm_sphere_u10` and
 `el_ibm_bridge` (240/400/300 steps on 4/8/8 ranks) print bit-identical
 report lines before and after the change, except the last digit of the
-fluid momentum in `el_ibm_collision`, which two runs of the unmodified code
-also disagree on. The impulse weight is `wimp*(JVOLP/(π/6 dp*dp*dp))`, in
+fluid momentum in `el_ibm_collision` (two runs of the unmodified code
+disagree on it too) and 1e-13 N in the cancelling y/z force components of
+`el_ibm_sphere_u10` at four of its 20 reports (body position, speed and
+parcel momentum identical throughout). The impulse weight is `wimp*(JVOLP/(π/6 dp*dp*dp))`, in
 the order `elibm.hpp` fills `JVOLP`, because gfortran's `dp**3` makes the
 existing `rnp` 1 ulp off 1 and that ulp grew to 0.5 % in the bouncing
 bridge case by step 300.
