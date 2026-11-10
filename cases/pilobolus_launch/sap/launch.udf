@@ -1,6 +1,7 @@
 // Pilobolus sporangium launch WITH SAP (Pilobolus step 5): the single-phase
 // case (../launch.udf) plus EL sap droplets injected at the nozzle (main
-// drops d_main and satellites d_sat, jet speed v_jet, for t < t_inj, total
+// drops d_main and satellites d_sat, jet speed v_jet (0: the body's speed at
+// the moment of emission, so the sap neither catches the cap nor lags it), for t < t_inj, total
 // volume sap_volume) that stick to the sporangium on contact
 // (attach = 1, Config::attachOnContact) and then ride on it, adding their
 // mass, or bounce and hold liquid bridges (attach = 0, bridge_*). The EL
@@ -273,6 +274,7 @@ void UDF_ExecuteStep(double time, int tstep)
     std::uniform_real_distribution<double> uni(0.0, 1.0);
     std::normal_distribution<double> gauss(0.0, 1.0);
     const double x0 = 1e-6; // nozzle plane
+    const double vj = vJet > 0 ? vJet : std::max(body.v[0], 1e-3); // v_jet 0: emitted at the cap's speed
     // drops now within 2 d_main of the nozzle (gathered above), plus this step's: (x, y, z, d)
     std::vector<std::array<double, 4>> near;
     for (size_t i = 0; i + elibm::kElCols <= all.size(); i += elibm::kElCols) {
@@ -288,11 +290,11 @@ void UDF_ExecuteStep(double time, int tstep)
         for (int k = 0; k < tries && !ok; ++k) {
           const double rMax = (jetMode && injectRadius > 0 ? injectRadius : nozzleRadius) - 0.5 * d;
           const double r = (rMax > 0 ? rMax : 0) * std::sqrt(uni(rng)), th = 2 * M_PI * uni(rng);
-          q = {x0 + vJet * uni(rng) * dt, r * std::cos(th), r * std::sin(th), d}; // emitted during this step
+          q = {x0 + vj * uni(rng) * dt, r * std::cos(th), r * std::sin(th), d}; // emitted during this step
           ok = true;
           for (const auto &o : near) { // clearance: radii (+ one step of jet travel for a drop train)
             const double dx = o[0] - q[0], dy = o[1] - q[1], dz = o[2] - q[2];
-            if (std::sqrt(dx * dx + dy * dy + dz * dz) < 0.5 * (o[3] + d) + (jetMode ? 0 : vJet * dt)) {
+            if (std::sqrt(dx * dx + dy * dy + dz * dz) < 0.5 * (o[3] + d) + (jetMode ? 0 : vj * dt)) {
               ok = false;
               break;
             }
@@ -304,19 +306,19 @@ void UDF_ExecuteStep(double time, int tstep)
         carry -= 1;
         near.push_back(q);
         p.x = {q[0], q[1], q[2]};
-        p.v = {vJet, vSpread * gauss(rng), vSpread * gauss(rng)};
+        p.v = {vj, vSpread * gauss(rng), vSpread * gauss(rng)};
         p.dp = d;
         p.rho = rhoSap;
         list.push_back(p);
         injectedVolume += M_PI / 6 * d * d * d;
         if (d == dMain) {
-          tLastMain = time - (q[0] - x0) / vJet;
+          tLastMain = time - (q[0] - x0) / vj;
         }
       }
     };
     emit(dMain, carryMain, jetMode ? 60 : 20);
     // satellites only in the gap: the last main drop has cleared the nozzle and the next is not due yet
-    const double clear = 1.1 * 0.5 * (dMain + dSat) / vJet;
+    const double clear = 1.1 * 0.5 * (dMain + dSat) / vj;
     if (time - tLastMain >= clear && (1 - carryMain) * tMain >= clear) {
       emit(dSat, carrySat, 50);
     }
