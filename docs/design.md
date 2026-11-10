@@ -1273,3 +1273,53 @@ What the two runs show:
   bridge run stays as the filter-sensitivity check.
 - Speed: 1.5–1.9 s/step with 4 900 parcels after patch 0007 (8 s before),
   32 min for the whole run on one node.
+
+**200 µm reruns with the contact force (2026-11-07…10, commits 9662cbb, 8ef4157).**
+Four cases went to Tuolumne: the prescribed pair and a free-flight twin of each
+(`sap_jet_tuo_free`, `sap_jet_tuo_free_nobridge`: prescribed for the 35 µs
+launch, then a free body under F_air + F_liquid + F_g). Only the bridge runs
+finished. `scripts/pilobolus_jet_accel_table.py` averages the report columns
+over the hand-off windows (prescribed, bridges on; measured in-flight
+deceleration −1 592 ± 103 m/s²):
+
+| window [ms] | a_f | a_c | a_f + a_c | F_c [µN] | F_br [µN] |
+|---|---|---|---|---|---|
+| 0–0.34 | −401 | +14 553 | +14 152 | +235 | −486 |
+| 0.4–0.6 | −316 | +13 766 | +13 450 | +222 | −636 |
+| 0.6–1.25 | −264 | +10 422 | +10 159 | +168 | −707 |
+
+![a_f, a_c, a_f + a_c](img/pilobolus_jet_accel.png)
+
+The air gives 17–25 % of the measured deceleration, as before. The contact
+force is *positive* and 6–9× the measured deceleration: the bridges pull the
+cap back by 0.5–0.7 mN, but the spring repulsion of the parcels hitting the
+rear face (+0.9 mN) is larger. The cause is the premise, not the model: the
+jet (15 m/s, 40 µg, 600 µg m/s) is faster than the tracked cap (9–10 m/s,
+16 µg, 160 µg m/s), so it keeps catching up and ramming the face for the
+whole 1.25 ms. Released after the launch ramp, the free-flight cap is
+accelerated by the jet from 10.3 to 12.7 m/s by 0.6 ms (the momentum of cap
+plus sap shared at 13.6 m/s is the upper bound), keeps that speed (a_f
+−353 m/s², a_c ≈ 0 once the jet has ended) and leaves the box through the
+x = 13 mm outflow at 1.1 ms:
+
+![free flight vs Video S3](img/pilobolus_jet_free_vs_videoS3.png)
+
+So with the sap launched faster than the cap no deceleration can come out of
+the contact; the next cases need the sap speed tied to the cap (same speed,
+or the sap speed read off the video) before a_c means anything.
+
+The no-bridge pair did not survive: the 200 µm prescribed run diverged at
+step 284 (0.23 ms), *earlier* than the 100 µm run (step 1 177), reproducibly
+(two runs, CFL 1.01 at step 284 and 76 at 316 in both), so the FWHM³ margin
+argument above was wrong, or not the whole story. The report line now
+carries `phi_max`, `FU_max` and `div_max` (maxima of the projected φ_p, of
+F_EL/(1 − φ_p) and of the continuity source, `Coupling::sourceExtrema()`),
+and the casedata `phi_max` caps φ_p in both terms (default 0 = off, results
+unchanged). The rerun with the diagnostics ruled φ_p out: φ_p stayed at 0.16
+and the EL source at 5.2e5 N/m³ while the CFL doubled every 5 steps, and the
+continuity correction is off in these cases. The remaining candidate is the
+parcels piled against the moving face (no bridges, restitution 0.05): their
+drag source, projected with a 200 µm FWHM, reaches inside the 178 µm cap,
+where it works against the IBM forcing every step. Unverified; needs the
+fluid field at step 300 (not kept) or a run with the EL source masked inside
+the bodies. The free no-bridge case waits for that.
