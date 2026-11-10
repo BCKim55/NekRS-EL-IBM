@@ -119,6 +119,7 @@ struct Config {
   vec3 grav{};
   std::array<bool, 3> periodic{};
   double filterWidth = 0;   // Gaussian FWHM of the EL projection (force, phi_p)
+  double phiMax = 0;        // > 0: cap the projected phi_p in 1/(1-phi_p) and the continuity source (0: no cap)
   double filterWidthIbm = 0; // Gaussian FWHM of the IBM marker spreading (0: filterWidth)
   double markerSpacing = 0; // ~ grid spacing; sets the marker count
   double kn = 0;            // contact stiffness (0: no contact)
@@ -741,6 +742,8 @@ private:
   std::vector<double> yLoc, rLoc;
   std::array<double, 6> intProjected{};
   vec3 intSource{};
+  // extrema of the projected fields on the last updateSources call (all ranks)
+  std::array<double, 3> srcMax{}; // max phi_p, max |F_EL/(1-phi_p)|, max |div source|
   double slipRmsLast = 0;
   std::vector<dfloat> FUel, FUib;           // EL and IBM parts of the next source
   std::vector<std::vector<dfloat>> extHist; // IBM part as written, newest first
@@ -853,6 +856,11 @@ private:
 
     std::vector<double> phi;
     ppiclf::projectedField(mesh, PPICLF_P_JPHIP, phi);
+    if (cfg.phiMax > 0) {
+      for (dlong n = 0; n < N; n++) {
+        phi[n] = std::min(phi[n], cfg.phiMax);
+      }
+    }
     if (o_phi.size()) {
       o_phi.copyFrom(std::vector<dfloat>(phi.begin(), phi.begin() + N));
     }
@@ -873,6 +881,13 @@ private:
       }
       MPI_Allreduce(MPI_IN_PLACE, &sum, 1, MPI_DOUBLE, MPI_SUM, comm());
       intProjected[c] = sum;
+    }
+    srcMax = {0, 0, 0};
+    for (dlong n = 0; n < N; n++) {
+      srcMax[0] = std::max(srcMax[0], phi[n]);
+      for (int k = 0; k < 3; k++) {
+        srcMax[1] = std::max(srcMax[1], std::abs(FUel[n + k * offset]));
+      }
     }
     if (!cfg.twoWay) {
       std::fill(FUel.begin(), FUel.end(), 0.0);
@@ -910,6 +925,7 @@ private:
           adv += u[n + k * offset] * grad[n + k * offset];
         }
         div[n] = -((phif[n] - phifLast[n]) / *dt + adv) / phif[n];
+        srcMax[2] = std::max(srcMax[2], std::abs((double)div[n]));
         sum[0] += massLocal[n] * div[n];
         sum[1] += massLocal[n];
       }
@@ -922,6 +938,15 @@ private:
     }
     phifLast = phif;
     o_div.copyFrom(div);
+  }
+
+public:
+  // max phi_p, max |F_EL/(1-phi_p)|, max |continuity source| of the last projection (collective)
+  std::array<double, 3> sourceExtrema() const
+  {
+    auto m = srcMax;
+    MPI_Allreduce(MPI_IN_PLACE, m.data(), 3, MPI_DOUBLE, MPI_MAX, comm());
+    return m;
   }
 };
 
