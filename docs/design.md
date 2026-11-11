@@ -1323,3 +1323,37 @@ drag source, projected with a 200 µm FWHM, reaches inside the 178 µm cap,
 where it works against the IBM forcing every step. Unverified; needs the
 fluid field at step 300 (not kept) or a run with the EL source masked inside
 the bodies. The free no-bridge case waits for that.
+
+**Jet at the cap's speed (`sap_jet_tuo_vcap`, `_vcap_free`, 2026-11-10, commit
+7349ae6).** `v_jet = 0` emits each parcel at the cap's speed of the moment
+(t_inj 0.51 ms for the same 40 nL). Both runs finished; the sap never touched
+the cap (a_c = 0 throughout): a_f −381/−257/−252 m/s² (prescribed) and
+−353/−253/−267 (free) over the three windows, 16–24 % of the measurement; the
+free cap slows from 10.0 to 9.66 m/s by air alone (tracked: 10.5 → 9.0).
+
+![jet at cap speed vs Video S3](img/pilobolus_jet_vcap_vs_videoS3.png)
+
+The snapshots show why. The parcels leave the nozzle at ~10 m/s and form a
+dense thread that keeps 10.15 m/s (prescribed run) / 9.66 m/s (free) for
+the whole 1.25 ms: in the thread the parcels entrain the air and shield each
+other, so the thread hardly decelerates (a single 25 µm drop at 10 m/s would
+lose speed at 10⁴ m/s²). Its front rides 0.5–0.6 mm behind the cap face
+(the 0.25 mm start gap plus what opens during the 35 µs launch ramp, when
+the cap out-accelerates the sap); in the prescribed run the tracked
+deceleration lets it close to 0.10 mm by 1.25 ms, in free flight the gap
+stays at 0.67 mm. So a sap thread flying with the cap cannot decelerate it:
+it carries no drag to hand over. Injecting at the cap's rear face instead
+would attach the thread but change nothing else (the thread would still
+stream at the cap's speed).
+
+What the measurement needs is a force of 1 592 m/s² × 16.13 µg = 26 µN on
+the cap. A liquid thread anchored at the sporangiophore transmits its
+capillary tension, πRσ = σπd/2 (surface tension 2πRσ minus the Laplace
+pressure over the cross-section): 11 µN for a 100 µm thread, 17 µN at
+150 µm, the order of the measured force on top of the 4–5 µN of air. An EL
+chain of Willett bridges cannot model that tether: anchored at the nozzle
+it breaks at the 9 µm rupture gap within a microsecond of the launch,
+whereas a real thread stretches and drains from the vesicle. The next model
+is therefore a tether force on the body, F = −T x̂ with T = σπd_t/2 while
+the thread holds (its length or lifetime from the video), reported like
+a_c, free flight or prescribed.
