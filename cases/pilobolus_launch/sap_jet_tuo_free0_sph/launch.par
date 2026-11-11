@@ -1,0 +1,90 @@
+userSections = CASEDATA
+
+[GENERAL]
+polynomialOrder = 5
+stopAt = endTime
+# 40 nL at 15 m/s through the 50 um nozzle takes 0.34 ms, then 0.16 ms of free flight
+# (the cap stays far from the x = 13 mm outflow); dt from the CFL on the band's edge GLL spacing (23 um) at 15 m/s
+endTime = 5.0e-4
+dt = 8.0e-7
+timeStepper = tombo2
+checkpointControl = steps
+checkpointInterval = 100
+
+[MESH]
+# launch.box: x in [-2, 13] mm, y, z in [-5, 5] mm, 75 x 14 x 14 = 14 700 elements,
+# fine band |y|,|z| < 0.6 mm with 0.2 mm elements (N = 5: 40 um); the laptop grid
+# of ../ extended to 13 mm because the 15.3 px/mm track reaches 12.3 mm at 1.25 ms
+file = "launch.re2"
+
+[FLUID PRESSURE]
+residualTol = 1e-6
+
+[FLUID VELOCITY]
+# 1: far field u = 0, 2: outflow at x+ (dynamic-pressure stabilised)
+boundaryTypeMap = udfDirichlet, zeroNeumann
+residualTol = 1e-8
+# air
+rho = 1.2
+viscosity = 1.8e-5
+
+[CASEDATA]
+# Pilobolus kleinii sporangium: aerodynamic radius 141 um (d = 0.282 mm, Fischer
+# et al. 2010 Fungal Biol 114:943, Table 1) and the Stokes-equivalent mass 16.13 ug
+# (Fungi.pptx: tau_p 0.33537 s from the 2.6 m range, U0 10 m/s, 30 deg) -> effective
+# density 1374 kg/m3. Re = 188 on d, 237 on the hemisphere width.
+diameter = 2.82e-4
+# 0: solid sphere of `diameter` (the same volume as the hemisphere twin ../sap_jet_tuo_fixed_hemi*)
+hemisphere = 0
+hemisphere_radius = 0
+body_rho = 1374.0
+# jet-launched cap: v_max 0 and t_rise 0 release the body at rest on the first
+# step (free_flight 1, no trajectory), so the jet alone launches it. The held twin
+# ../sap_jet_tuo_fixed_sph measured the thrust 1.3-1.5 mN (a_c ~1e5 m/s2): 10 m/s
+# would take ~100 us at constant thrust, vs the measured 35 us ramp.
+v_max = 0.0
+t_rise = 0.0
+decel = 0.0
+# body centre (sphere) / face centre (hemisphere) at x_start in front of the nozzle at the origin
+x_start = 2.5e-4
+free_flight = 1
+# IBM interface: markers ~ 0.6 x the band's mean GLL spacing, FWHM 2 x that
+marker_spacing = 2.5e-5
+filter_width_ibm = 5e-5
+# EL projection FWHM: 4-5 GLL spacings. 1.0e-4 went unstable (CFL blow-up at
+# step 1200 without bridges): up to 30 parcels per (100 um)^3 behind the body
+# make the explicit drag reaction stiff; the margin scales with FWHM^3.
+filter_width = 2.0e-4
+# sap as a continuous jet: 40 nL (video: 10-50 nL) of 25 um parcels (jet d / 4,
+# ~4 900 parcels) at v_jet 15 m/s (hand-off 12 m/s at 20 px/mm rescaled by 20/15.3);
+# t_inj = V / (pi r_n^2 v) = 0.34 ms. jet_mode 1: dense non-overlapping stream in a
+# disc of inject_radius 100 um, so the liquid flux is that of a 100 um jet at 15 m/s.
+jet_mode = 1
+inject_radius = 1.0e-4
+sap_volume = 4.0e-11
+d_main = 2.5e-5
+d_sat = 1.8e-5
+sat_fraction = 0.0
+v_jet = 15.0
+v_spread = 0.5
+t_inj = 3.4e-4
+nozzle_radius = 5.0e-5
+rho_sap = 1005.0
+# parcel contact: spring-dashpot, e ~ 0 (wet drops on a wet body), no sticking switch.
+# kn 200: a 25 um parcel (8.2 ng) hitting the face at 15 m/s sinks 3 um (0.12 d),
+# contact period 0.64 us -> 16 substeps of 0.05 us
+attach = 0
+kn = 200.0
+restitution = 0.05
+substeps = 16
+# liquid bridges (design doc 7.9) between parcels and parcel-body: sigma 0.072,
+# theta 0, V_b/V_p 0.1 -> rupture gap 9 um. The companion case *_nobridge
+# switches both off.
+bridge_el = 1
+bridge_ibm = 1
+sigma = 0.072
+contact_angle_deg = 0
+bridge_volume_fraction = 0.1
+report_interval = 20
+# EL/body snapshots every n steps for the movie (0: off)
+snapshot_interval = 10
