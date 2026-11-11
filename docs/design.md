@@ -1398,3 +1398,41 @@ MI300A. The reference is the jet's momentum flux ρπr_n²v² = 1.78 mN
   `--video`) shows the sphere wrapped by a parcel sheath that streams off
   downstream, and the hemisphere splashing the parcels radially off its
   face.
+
+#### Cap launched from rest by the jet (`sap_jet_tuo_free0_{sph,hemi}`, 2026-11-11)
+
+The free twins of the held cases (`free_flight = 1`, `t_rise = 0`): the cap is
+released at rest on the first step and only the 15 m/s, 40 nL jet pushes it
+(bridges on). This is the "jet pushes the sporangium" mechanism on its own.
+
+| | sphere | hemisphere | measured (Video S3) |
+|---|---|---|---|
+| v at 80 µs (m/s) | 3.8 | 4.5 | 10.5 |
+| time to 10 m/s (ms) | 0.48 | 0.48 | 0.035 |
+| mean a, 0–0.34 ms (m/s²) | 2.4 × 10⁴ | 2.9 × 10⁴ | 2.85 × 10⁵ (0–35 µs) |
+| mean F_c, 0.05–0.34 ms (mN) | 0.32 | 0.33 | held cap: 1.26 / 1.54 |
+| v at 0.5 ms (m/s) | 10.15 | 10.15 | 9.9 (decelerating) |
+
+![cap launched by the jet](img/pilobolus_jet_free0.png)
+
+- The jet alone launches the cap ten times too slowly: 10 m/s at 0.48 ms
+  instead of 35 µs. The thrust falls from the held-cap 1.3–1.5 mN to
+  0.33 mN as soon as the cap moves, because the relative speed drops
+  (F ∝ (v_j − v)²): at 4 m/s only half the momentum flux is left, at 8 m/s
+  a fifth. Sphere and hemisphere differ only in the first 0.15 ms (the flat
+  face takes more of the early impulse); from 0.24 ms on both follow the
+  same v(t).
+- The cap keeps accelerating after the injection ends at 0.34 ms: the
+  15 m/s thread behind it is still arriving, and it reaches 10.15 m/s at
+  0.5 ms, close to the jet speed, where the thrust vanishes. With no tether
+  or vesicle pull this would be the launch speed.
+- The movie `img/pilobolus_jet_free0.mp4` shows the sap riding with the
+  cap: a wetted shell on the sphere, and on the hemisphere a disc of sap
+  spreading from the face, like the sap disc in the video, fed by the
+  thread. Nothing stays behind at the nozzle.
+- Conclusion: the measured 35 µs ramp needs the vesicle pressure acting on
+  the sporangium directly (the paper's first term); the jet contributes
+  about a tenth of it. A launch model therefore prescribes the ramp (as the
+  earlier cases do) or applies the pressure as a force on the cap and the
+  sap over t_rise, and the jet's job in the model is the sap disc and
+  thread it leaves on and behind the cap.
