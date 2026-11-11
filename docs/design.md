@@ -1436,3 +1436,18 @@ released at rest on the first step and only the 15 m/s, 40 nL jet pushes it
   earlier cases do) or applies the pressure as a force on the cap and the
   sap over t_rise, and the jet's job in the model is the sap disc and
   thread it leaves on and behind the cap.
+
+The no-bridge twins (`sap_jet_tuo_free0_{sph,hemi}_nobridge`) launch the cap
+the same way or faster (hemisphere 9.9 m/s at 0.32 ms vs 9.0 with bridges,
+which pull back; sphere 8.1 vs 9.0) and then diverge at step 459 / 478
+(0.37 / 0.38 ms), the "Unreasonable FLUID CFL" abort of the moving no-bridge
+run above. The growth is in the fluid, not the parcels: the parcel speeds
+stay ≤ 15.5 m/s to the last snapshot, no parcel is in contact, phi_max
+0.13–0.16 and div_max 0, while the fluid CFL creeps from 0.6 (step 400) to
+0.95 (420, the last injected parcel), 1.5 (438) and then doubles every
+three steps. The held no-bridge caps and every bridge run are stable, so
+the trigger needs a moving body with loose parcels against it; what the
+fluid does there is not visible without checkpoints every few steps
+(restart from the step-400 checkpoint with `checkpointInterval = 5` would
+locate it). Since a wet cap in a wet jet has bridges, the bridge runs are
+the physical model and the no-bridge divergence is parked.
