@@ -8,7 +8,9 @@ snapshots alone (no fluid checkpoints needed; matplotlib, no ParaView).
 Experiment frames: the 1100x792 tracking video, image panel = x -4..12.5 mm,
 y -1..3 mm at cols 248..880, rows 96..253; frame i is t = (i-15)*20 us.
 Run frames every --dt from the snapshots (written every 8 us), parcels
-coloured by u, the body as its hemisphere outline (dome towards +x).
+coloured by u, the body as its outline (hemisphere with the dome towards +x,
+or the sphere of a shape-0 body). Without --video only the runs are stacked
+(fixed-body jet cases, e.g. --window -0.5 2 -0.6 0.6 --tend 5e-4).
 """
 import argparse
 import glob
@@ -25,7 +27,7 @@ import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--video", required=True)
+ap.add_argument("--video", default=None, help="Video S3 tracking mp4; omit for run panels only")
 ap.add_argument("--run", action="append", required=True, help="label=case dir (holds snapshots/)")
 ap.add_argument("--out", required=True)
 ap.add_argument("--dt", type=float, default=40e-6)
@@ -38,10 +40,12 @@ args = ap.parse_args()
 W, H = 1268, 316
 x0, x1, y0, y1 = args.window
 tmp = tempfile.mkdtemp(prefix="jetmovie_")
-exp = os.path.join(tmp, "exp")
-os.makedirs(exp)
-subprocess.run(["ffmpeg", "-v", "error", "-i", args.video, os.path.join(exp, "e_%04d.png")], check=True)
-expf = sorted(glob.glob(os.path.join(exp, "e_*.png")))
+expf = []
+if args.video:
+    exp = os.path.join(tmp, "exp")
+    os.makedirs(exp)
+    subprocess.run(["ffmpeg", "-v", "error", "-i", args.video, os.path.join(exp, "e_%04d.png")], check=True)
+    expf = sorted(glob.glob(os.path.join(exp, "e_*.png")))
 font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 22)
 
 
@@ -58,13 +62,15 @@ dpi = 100
 times = np.arange(0, args.tend + 1e-9, args.dt)
 n = 0
 for t in times:
-    i = int(round(t / 20e-6)) + 15
-    if i >= len(expf):
-        break
-    e = Image.open(expf[i]).crop((248, 96, 881, 254)).resize((W, H), Image.BICUBIC)
-    d = ImageDraw.Draw(e)
-    d.text((12, 8), "experiment (Video S3)   t = %.3f ms" % (t * 1e3), fill=(200, 0, 0), font=font)
-    rows = [e]
+    rows = []
+    if expf:
+        i = int(round(t / 20e-6)) + 15
+        if i >= len(expf):
+            break
+        e = Image.open(expf[i]).crop((248, 96, 881, 254)).resize((W, H), Image.BICUBIC)
+        d = ImageDraw.Draw(e)
+        d.text((12, 8), "experiment (Video S3)   t = %.3f ms" % (t * 1e3), fill=(200, 0, 0), font=font)
+        rows.append(e)
     for label, (body, els) in runs:
         step = int(round(t / 0.8e-6))
         k = min(els, key=lambda s: abs(s - step))
@@ -76,7 +82,7 @@ for t in times:
             a = np.atleast_1d(a)
             ax.scatter(a["x"] * 1e3, a["y"] * 1e3, c=a["u"], s=1.5, vmin=0, vmax=args.umax, cmap="Blues", linewidths=0)
         R = b["radius"] * 1e3
-        th = np.linspace(-np.pi / 2, np.pi / 2, 60)
+        th = np.linspace(-np.pi / 2, np.pi / 2, 60) if b["shape"] == 2 else np.linspace(0, 2 * np.pi, 120)
         xs = np.concatenate([[b["x"] * 1e3], b["x"] * 1e3 + R * np.cos(th), [b["x"] * 1e3]])
         ys = np.concatenate([[b["y"] * 1e3 - R], b["y"] * 1e3 + R * np.sin(th), [b["y"] * 1e3 + R]])
         ax.fill(xs, ys, color="0.25", lw=0)

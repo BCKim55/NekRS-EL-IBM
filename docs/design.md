@@ -1357,3 +1357,44 @@ whereas a real thread stretches and drains from the vesicle. The next model
 is therefore a tether force on the body, F = −T x̂ with T = σπd_t/2 while
 the thread holds (its length or lifetime from the video), reported like
 a_c, free flight or prescribed.
+
+#### Jet thrust on a held cap (`sap_jet_tuo_fixed_{sph,hemi}[_nobridge]`, 2026-11-11)
+
+Before any launch model, the "jet pushes the sporangium" term on its own: the
+cap is held at x_start = 0.25 mm (`v_max = 0`, no trajectory) and the 40 nL
+jet hits it at 15 m/s for 0.34 ms (t_inj = V/(πr_n²v)), then 0.16 ms of
+drainage; the sphere (d 282 µm) and the equal-volume hemisphere, each with
+and without liquid bridges; four pdebug runs of 625 steps, ~20 min on 4
+MI300A. The reference is the jet's momentum flux ρπr_n²v² = 1.78 mN
+(a_c = 1.1 × 10⁵ m/s² on 16.13 µg; the measured launch ramp 0 → 10 m/s in
+35 µs is 2.85 × 10⁵).
+
+| case | F_c (mN), 0.05–0.34 ms | F_c / (ρπr_n²v²) | F_br (mN) | a_c (10⁵ m/s²) | F_c after injection (mN) |
+|---|---|---|---|---|---|
+| sphere, bridges | 1.26 (0.8–2.0) | 0.71 | +0.07 | 0.78 | 0.15 (F_br +0.69) |
+| sphere, no bridges | 0.97 (0.6–1.4) | 0.55 | 0 | 0.60 | 0 |
+| hemisphere, bridges | 1.54 (0.7–2.3) | 0.86 | −1.43 | 0.95 | 0 (F_br −0.57) |
+| hemisphere, no bridges | 1.67 (0.9–2.3) | 0.94 | 0 | 1.03 | 0 |
+
+![jet thrust on a held cap](img/pilobolus_jet_fixed_force.png)
+
+- The flat face takes almost the whole momentum flux (0.94 without
+  bridges; e = 0.05, so no rebound to add). The sphere deflects the parcels
+  around itself and keeps only 55–71 %. The range in brackets is the
+  20-step sampling of the impulsive spring contacts.
+- Bridges change the split, not the total, on the hemisphere: the parcels
+  held on the face are compressed by the ones behind (spring part 2.97 mN)
+  and the bridges pull back −1.43 mN; net 1.54 vs 1.67 mN. On the sphere
+  the bridges hold a wetted layer that raises the thrust 0.97 → 1.26 mN and
+  leaves 0.15 mN after the jet stops (a film pulled around the sphere).
+- Launch budget: at 15 m/s the jet alone gives 0.6–1.0 × 10⁵ m/s², 20–35 %
+  of the measured ramp. With F ∝ v², the hemisphere needs v_jet ≈ 25 m/s to
+  deliver the 2.85 × 10⁵ m/s² by thrust alone (the paper's mechanism adds
+  the vesicle pressure acting on the sporangium directly).
+- Both no-bridge runs finished (phi_max 0.13/0.18). The step-284 CFL
+  blow-up of the moving no-bridge run (above) therefore needs the moving
+  body: the parcel pile travelling with the IBM face, not the pile itself.
+- The movie `img/pilobolus_jet_fixed.mp4` (the parcel-movie script without
+  `--video`) shows the sphere wrapped by a parcel sheath that streams off
+  downstream, and the hemisphere splashing the parcels radially off its
+  face.
