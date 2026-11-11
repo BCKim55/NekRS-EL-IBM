@@ -8,7 +8,7 @@ snapshots alone (no fluid checkpoints needed; matplotlib, no ParaView).
 Experiment frames: the 1100x792 tracking video, image panel = x -4..12.5 mm,
 y -1..3 mm at cols 248..880, rows 96..253; frame i is t = (i-15)*20 us.
 Run frames every --dt from the snapshots (written every 8 us), parcels
-coloured by u, the body as its outline (hemisphere with the dome towards +x,
+coloured by u and drawn at their true diameter, the body as its outline (hemisphere with the dome towards +x,
 or the sphere of a shape-0 body). Without --video only the runs are stacked
 (fixed-body jet cases, e.g. --window -0.5 2 -0.6 0.6 --tend 5e-4).
 """
@@ -80,7 +80,9 @@ for t in times:
         a = np.genfromtxt(els[k], delimiter=",", names=True)
         if a.size:
             a = np.atleast_1d(a)
-            ax.scatter(a["x"] * 1e3, a["y"] * 1e3, c=a["u"], s=1.5, vmin=0, vmax=args.umax, cmap="Blues", linewidths=0)
+            # markers at the parcels' true size: diameter in points = dp [mm] * px/mm * 72/dpi
+            pt = a["dp"] * 1e3 * (W / (x1 - x0)) * 72.0 / dpi
+            ax.scatter(a["x"] * 1e3, a["y"] * 1e3, c=a["u"], s=pt * pt, vmin=0, vmax=args.umax, cmap="Blues", linewidths=0, alpha=0.8)
         R = b["radius"] * 1e3
         th = np.linspace(-np.pi / 2, np.pi / 2, 60) if b["shape"] == 2 else np.linspace(0, 2 * np.pi, 120)
         xs = np.concatenate([[b["x"] * 1e3], b["x"] * 1e3 + R * np.cos(th), [b["x"] * 1e3]])
