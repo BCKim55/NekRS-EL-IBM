@@ -72,8 +72,9 @@ for t in times:
         d.text((12, 8), "experiment (Video S3)   t = %.3f ms" % (t * 1e3), fill=(200, 0, 0), font=font)
         rows.append(e)
     for label, (body, els) in runs:
-        step = int(round(t / 0.8e-6))
-        k = min(els, key=lambda s: abs(s - step))
+        # nearest snapshot in time (body.csv has t per step; runs may use different dt)
+        b = body[np.argmin(np.abs(body["t"] - t))]
+        k = min(els, key=lambda s: abs(s - int(b["step"])))
         b = body[np.argmin(np.abs(body["step"] - k))]
         fig = plt.figure(figsize=(W / dpi, H / dpi), dpi=dpi)
         ax = fig.add_axes([0, 0, 1, 1])
