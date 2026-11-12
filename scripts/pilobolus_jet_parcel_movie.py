@@ -85,7 +85,9 @@ for t in times:
             ax.scatter(a["x"] * 1e3, a["y"] * 1e3, c=a["u"], s=pt * pt, vmin=0, vmax=args.umax, cmap="Blues", linewidths=0, alpha=0.8)
         R = b["radius"] * 1e3
         th = np.linspace(-np.pi / 2, np.pi / 2, 60) if b["shape"] == 2 else np.linspace(0, 2 * np.pi, 120)
-        xs = np.concatenate([[b["x"] * 1e3], b["x"] * 1e3 + R * np.cos(th), [b["x"] * 1e3]])
+        # body.csv holds the centre of mass; a hemisphere's sphere centre (and flat face) sits 3R/8 behind it (axis +x)
+        xc = b["x"] * 1e3 - (0.375 * R if b["shape"] == 2 else 0.0)
+        xs = np.concatenate([[xc], xc + R * np.cos(th), [xc]])
         ys = np.concatenate([[b["y"] * 1e3 - R], b["y"] * 1e3 + R * np.sin(th), [b["y"] * 1e3 + R]])
         ax.fill(xs, ys, color="0.25", lw=0)
         ax.set_xlim(x0, x1)
