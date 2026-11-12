@@ -1450,4 +1450,27 @@ the trigger needs a moving body with loose parcels against it; what the
 fluid does there is not visible without checkpoints every few steps
 (restart from the step-400 checkpoint with `checkpointInterval = 5` would
 locate it). Since a wet cap in a wet jet has bridges, the bridge runs are
-the physical model and the no-bridge divergence is parked.
+the physical model.
+
+**Resolved (2026-11-12): the divergence is the time step, not the
+coupling.** Two tests. (1) `el_mask_gap` (commit 3b53a86) drops the EL
+momentum source inside a body plus a gap outside its surface: with gap 0
+and 50 µm the no-bridge hemisphere still blows up (step ~410 vs 478, the
+sphere at 460 vs 459), the dropped integral is 0.3 µN (7 % of the fluid
+force) and FU_max stays at 5e5 throughout, while the bridge control with
+the mask ends at 10.12 m/s vs 10.15 without. The EL source near the body is
+not the trigger. (2) The report line now carries the fluid velocity maximum
+and its position relative to the body (`umax ... at`, commit 3c12e55). It
+sits on the axis 0.3–2 mm behind the cap, inside the sap thread, and grows
+with the cap speed from 10.6 m/s (0.03 ms) to 17.5 m/s (0.16 ms): the air
+in the thread overtakes the 15 m/s the design dt was set for, CFL 0.61–0.67
+instead of 0.52, above what nekRS's extrapolated advection tolerates with a
+dense explicit EL source on top. `sap_jet_tuo_free0_hemi_nobridge_dt4`
+(dt 4e-7, 1250 steps) runs to the end with CFL ≤ 0.30 and the same umax
+history step for time (17.2 m/s at 0.32 ms in both). The held caps stay
+below the threshold (no wake acceleration), the bridge runs chain the thread
+into a smooth source, hence "moving body plus loose parcels". Rule for the
+next cases: dt 5e-7 (CFL ≈ 0.38) or nekRS `targetCFL = 0.4`; the bridge
+runs above sat at CFL ≈ 0.6 and stayed stable, so their results stand.
+Loose sap also launches faster: 11.07 m/s at 0.5 ms vs 10.15 with bridges
+(the sap hits and leaves instead of riding along as mass).
