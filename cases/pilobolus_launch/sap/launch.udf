@@ -63,6 +63,7 @@ static double carryMain = 0, carrySat = 0, injectedVolume = 0, tLastMain = -1;
 static int jetMode = 0; // 1: dense stream of small parcels: touching allowed, no overlap, placed in a disc of inject_radius
 static double injectRadius = 0;
 static double phiMax = 0; // > 0: cap on the projected phi_p (phi_max; 0: none)
+static double elMaskGap = -1; // >= 0: drop the EL source inside the body + this gap (el_mask_gap; < 0: off)
 static std::mt19937_64 rng(2026);
 
 #ifdef __okl__
@@ -136,6 +137,7 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
   get("marker_spacing", markerSpacing);
   get("filter_width", filterWidth);
   get("phi_max", phiMax);
+  get("el_mask_gap", elMaskGap);
   get("report_interval", reportInterval);
   get("snapshot_interval", snapshotInterval);
   get("filter_width_ibm", filterWidthIbm);
@@ -193,6 +195,7 @@ void UDF_Setup()
   cfg.grav = {0.0, -9.81, 0.0};
   cfg.filterWidth = filterWidth;
   cfg.phiMax = phiMax;
+  cfg.elMaskGap = elMaskGap;
   cfg.filterWidthIbm = filterWidthIbm;
   cfg.markerSpacing = markerSpacing;
   cfg.qtl = false;
@@ -342,10 +345,10 @@ void UDF_ExecuteStep(double time, int tstep)
     const auto ext = coupling->sourceExtrema(); // collective
     if (platform->comm.mpiRank() == 0) {
       printf("launch: step %d  t %.4e  x %.4e  v %.4f  a %.4e  Fm %.4e %.4e %.4e  F %.4e  Cd %.4f  a_f %.4e  slip %.3e"
-             "  drops %lld  stuck %lld  m_stuck %.3e  P_sap %.4e  Fc %.4e  Fbr %.4e  a_c %.4e  a_tot %.4e  phi_max %.3e  FU_max %.3e  div_max %.3e%s\n",
+             "  drops %lld  stuck %lld  m_stuck %.3e  P_sap %.4e  Fc %.4e  Fbr %.4e  a_c %.4e  a_tot %.4e  phi_max %.3e  FU_max %.3e  div_max %.3e  Fmask %.4e%s\n",
              tstep, time, body.x[0], body.v[0], ax, fm[0], fm[1], fm[2], fx, cd, fx / (bodyRho * V), coupling->slipRms(),
              tot.nEl, tot.nAttached, tot.attachedMass, tot.elMomentum[0], fcn[0], fbr[0], fcn[0] / (bodyRho * V),
-             (fx + fcn[0]) / (bodyRho * V), ext[0], ext[1], ext[2], body.prescribed ? "" : "  free");
+             (fx + fcn[0]) / (bodyRho * V), ext[0], ext[1], ext[2], coupling->maskedSource()[0], body.prescribed ? "" : "  free");
       if (nrs->lastStep) {
         printf("launch: injected %.4e m3 of %.4e (main carry %.2f, satellite carry %.2f deferred)\n", injectedVolume, sapVolume, carryMain, carrySat);
       }

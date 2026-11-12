@@ -144,6 +144,10 @@ struct Config {
   bool interpEverySubstep = false; // re-interpolate the (frozen) fluid velocity at every substep, not only the first and last
   int ioStep = 0; // ppiclF VTU interval in fluid steps (0: none)
   bool twoWay = true; // false: particles feel the fluid, the fluid not the particles
+  // >= 0: drop the EL momentum source at GLL points inside a body or within
+  // this distance (m) outside its surface, where the IBM forcing already sets
+  // the velocity (0: the body interior only; < 0: off)
+  double elMaskGap = -1;
   bool qtl = true;
   bool zeroMeanDiv = true; // closed or fully periodic domain
   // checkpoint slot for the projected particle volume fraction phi_p ("" : not written);
@@ -179,7 +183,8 @@ public:
     massLocal.resize(mesh->Nlocal);
     mesh->o_LMM.copyTo(massLocal.data(), mesh->Nlocal);
 
-    std::vector<dfloat> x(mesh->Nlocal), y(mesh->Nlocal), z(mesh->Nlocal);
+    auto &x = meshX[0], &y = meshX[1], &z = meshX[2];
+    x.resize(mesh->Nlocal), y.resize(mesh->Nlocal), z.resize(mesh->Nlocal);
     mesh->o_x.copyTo(x.data(), mesh->Nlocal);
     mesh->o_y.copyTo(y.data(), mesh->Nlocal);
     mesh->o_z.copyTo(z.data(), mesh->Nlocal);
@@ -741,6 +746,8 @@ private:
   std::vector<double> phifLast;
   std::vector<double> yLoc, rLoc;
   std::array<double, 6> intProjected{};
+  std::array<std::vector<dfloat>, 3> meshX; // GLL coordinates (host)
+  vec3 intMasked{};                         // int F_EL dV dropped by Config::elMaskGap
   vec3 intSource{};
   // extrema of the projected fields on the last updateSources call (all ranks)
   std::array<double, 3> srcMax{}; // max phi_p, max |F_EL/(1-phi_p)|, max |div source|
@@ -793,6 +800,54 @@ private:
       }
     }
     rot = out;
+  }
+
+  // signed distance from a point at d (relative to the centre of mass) to
+  // the body surface, positive outside; the same shapes as the Fortran gsurf
+  static double signedDistance(const Body &b, const vec3 &d)
+  {
+    const double R = b.radius;
+    if (!b.hemisphere) {
+      const double z = b.cylinder() ? 0.0 : d[2];
+      return std::sqrt(d[0] * d[0] + d[1] * d[1] + z * z) - R;
+    }
+    vec3 p{};
+    for (int k = 0; k < 3; k++) {
+      p[k] = b.rot[3 * k] * d[0] + b.rot[3 * k + 1] * d[1] + b.rot[3 * k + 2] * d[2];
+    }
+    p[2] += Body::kHemiOffset * R; // relative to the sphere centre
+    if (p[2] >= 0) {
+      return std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]) - R;
+    }
+    const double rho = std::sqrt(p[0] * p[0] + p[1] * p[1]);
+    return rho <= R ? -p[2] : std::sqrt((rho - R) * (rho - R) + p[2] * p[2]);
+  }
+
+  // zero FUel where a body (plus cfg.elMaskGap) covers the GLL point
+  void maskSourceInBodies(dlong offset)
+  {
+    intMasked = {0, 0, 0};
+    if (cfg.elMaskGap < 0) {
+      return;
+    }
+    const dlong N = nrs->meshV->Nlocal;
+    for (const auto &b : bodyList) {
+      const double reach = b.radius * (b.hemisphere ? 1 + Body::kHemiOffset : 1) + cfg.elMaskGap;
+      for (dlong n = 0; n < N; n++) {
+        const vec3 d = {meshX[0][n] - b.x[0], meshX[1][n] - b.x[1], meshX[2][n] - b.x[2]};
+        if (std::abs(d[0]) > reach || std::abs(d[1]) > reach || std::abs(d[2]) > reach) {
+          continue;
+        }
+        if (signedDistance(b, d) > cfg.elMaskGap) {
+          continue;
+        }
+        for (int k = 0; k < 3; k++) {
+          intMasked[k] += massLocal[n] * FUel[n + k * offset];
+          FUel[n + k * offset] = 0;
+        }
+      }
+    }
+    MPI_Allreduce(MPI_IN_PLACE, intMasked.data(), 3, MPI_DOUBLE, MPI_SUM, comm());
   }
 
   void applySource()
@@ -882,6 +937,7 @@ private:
       MPI_Allreduce(MPI_IN_PLACE, &sum, 1, MPI_DOUBLE, MPI_SUM, comm());
       intProjected[c] = sum;
     }
+    maskSourceInBodies(offset);
     srcMax = {0, 0, 0};
     for (dlong n = 0; n < N; n++) {
       srcMax[0] = std::max(srcMax[0], phi[n]);
@@ -941,6 +997,8 @@ private:
   }
 
 public:
+  // int F_EL dV removed inside the bodies by Config::elMaskGap on the last projection
+  vec3 maskedSource() const { return intMasked; }
   // max phi_p, max |F_EL/(1-phi_p)|, max |continuity source| of the last projection (collective)
   std::array<double, 3> sourceExtrema() const
   {
