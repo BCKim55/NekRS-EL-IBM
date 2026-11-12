@@ -1474,3 +1474,46 @@ next cases: dt 5e-7 (CFL ≈ 0.38) or nekRS `targetCFL = 0.4`; the bridge
 runs above sat at CFL ≈ 0.6 and stayed stable, so their results stand.
 Loose sap also launches faster: 11.07 m/s at 0.5 ms vs 10.15 with bridges
 (the sap hits and leaves instead of riding along as mass).
+
+### 7.13 What the sap does in Video S3: sheet metrics (`scripts/pilobolus_video_sheet.py`)
+
+Target numbers for the sap model, measured on the Video S3 panel of
+`sporangium_tracking.mp4` (50 000 fps, 65 µm/px, upsampled 2.5x in the
+movie; `docs/data/pilobolus_video_sheet.csv`, overlay
+`img/pilobolus_video_sheet_overlay.png`). Background-subtracted dark
+pixels with the tracked sporangium (r 0.3 mm) and the thread removed;
+columns taller than 0.4 mm are the sheet. The lower rim leaves the field at
+y = −0.9 mm, so the radius is the upper rim.
+
+![sheet metrics](img/pilobolus_video_sheet.png)
+
+| quantity | value |
+|---|---|
+| sheet appears | between t = 0 and 20 µs, already 1.3 mm tall (upper rim 0.8 mm: ≥ 40 m/s radial) |
+| radial speed of the rim | 6 m/s (20–100 µs), 1.8 (100–200), 0.5 (200–300), 0 after 300 µs |
+| final radius | 1.5–1.6 mm (upper rim), reached by 200 µs, no measurable retraction |
+| sheet centre speed | 8.3 m/s (100–440 µs), constant; sporangium 10.7 m/s over the same window |
+| sheet position | at the sporangium (centre 0.1 mm *ahead* of the tracked centre) until 60 µs, at its rear face by 180 µs, then falls behind at 2.4 m/s: 0.8 mm at 440 µs |
+| shape | continuous film to ~150 µs, radial ligaments with beads 200–450 µs, breaks up (pixel count collapses) at 460–520 µs |
+| film thickness (if 10–50 nL over r 1.5 mm) | 1.4–7 µm |
+
+Reading. (1) The sheet is not made by a jet hitting the cap after launch:
+it exists within one frame of t = 0, centred on the sporangium, with a
+radial speed far above the 15 m/s the jet picture allows. It is the
+vesicle burst expelling sap radially while the sporangium leaves. (2) It is
+towed, not pushed: it moves at a constant 8.3 m/s without the deceleration
+a 3 mm disc in air would show (a solid disc of 20 µg at 8 m/s would lose
+~4 m/s in 0.4 ms), so it is perforated/ligamented and hangs on the thread.
+(3) Surface tension never pulls it back: the radius saturates and holds;
+what looks like "pulled toward the sporangium" is the arms being towed
+while the sheet falls behind. Its role is to hold the film together, then
+to break it into ligaments and drops. (4) A sap mass of 20 µg at 8 m/s
+carries momentum comparable to the sporangium's (16 µg × 10.7 m/s).
+
+Implications for the model: the sap initial condition should be a thin
+disc at the sporangium with a radial velocity of order 40 m/s at t = 0 and
+an axial velocity near the sporangium's, tethered to the thread, rather
+than a jet from a nozzle at rest; a 1–7 µm film cannot be a cloud of 25 µm
+parcels, so parcels of ~5 µm (or a sheet surrogate) are needed to carry
+its area; and the comparison metrics are the rim radius r(t), the
+sheet–sporangium lag Δx(t) and the break-up time, not the picture.
