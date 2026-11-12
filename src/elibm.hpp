@@ -997,6 +997,34 @@ private:
   }
 
 public:
+  // max |u| over the fluid GLL points and its location (collective)
+  std::array<double, 4> velocityMax() const
+  {
+    auto &fluid = nrs->fluid;
+    const auto offset = fluid->fieldOffset;
+    const dlong N = nrs->meshV->Nlocal;
+    std::vector<dfloat> u(3 * offset);
+    fluid->o_U.copyTo(u.data(), u.size());
+    double best = -1;
+    dlong at = 0;
+    for (dlong n = 0; n < N; n++) {
+      const double m = u[n] * u[n] + u[n + offset] * u[n + offset] + u[n + 2 * offset] * u[n + 2 * offset];
+      if (m > best) {
+        best = m, at = n;
+      }
+    }
+    struct {
+      double v;
+      int rank;
+    } in{best, platform->comm.mpiRank()}, out{};
+    MPI_Allreduce(&in, &out, 1, MPI_DOUBLE_INT, MPI_MAXLOC, comm());
+    std::array<double, 4> r = {std::sqrt(std::max(out.v, 0.0)), 0, 0, 0};
+    if (out.rank == in.rank) {
+      r[1] = meshX[0][at], r[2] = meshX[1][at], r[3] = meshX[2][at];
+    }
+    MPI_Bcast(r.data() + 1, 3, MPI_DOUBLE, out.rank, comm());
+    return r;
+  }
   // int F_EL dV removed inside the bodies by Config::elMaskGap on the last projection
   vec3 maskedSource() const { return intMasked; }
   // max phi_p, max |F_EL/(1-phi_p)|, max |continuity source| of the last projection (collective)

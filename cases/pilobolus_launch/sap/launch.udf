@@ -343,12 +343,13 @@ void UDF_ExecuteStep(double time, int tstep)
     const double cd = -fx / (0.5 * rhof * u * u * M_PI * dRef * dRef / 4.0) * (body.v[0] < 0 ? -1 : 1);
     const auto tot = coupling->totals(); // collective
     const auto ext = coupling->sourceExtrema(); // collective
+    const auto um = coupling->velocityMax();    // collective: max |u| and where, relative to the body below
     if (platform->comm.mpiRank() == 0) {
       printf("launch: step %d  t %.4e  x %.4e  v %.4f  a %.4e  Fm %.4e %.4e %.4e  F %.4e  Cd %.4f  a_f %.4e  slip %.3e"
-             "  drops %lld  stuck %lld  m_stuck %.3e  P_sap %.4e  Fc %.4e  Fbr %.4e  a_c %.4e  a_tot %.4e  phi_max %.3e  FU_max %.3e  div_max %.3e  Fmask %.4e%s\n",
+             "  drops %lld  stuck %lld  m_stuck %.3e  P_sap %.4e  Fc %.4e  Fbr %.4e  a_c %.4e  a_tot %.4e  phi_max %.3e  FU_max %.3e  div_max %.3e  Fmask %.4e  umax %.2f at %.3e %.3e %.3e%s\n",
              tstep, time, body.x[0], body.v[0], ax, fm[0], fm[1], fm[2], fx, cd, fx / (bodyRho * V), coupling->slipRms(),
              tot.nEl, tot.nAttached, tot.attachedMass, tot.elMomentum[0], fcn[0], fbr[0], fcn[0] / (bodyRho * V),
-             (fx + fcn[0]) / (bodyRho * V), ext[0], ext[1], ext[2], coupling->maskedSource()[0], body.prescribed ? "" : "  free");
+             (fx + fcn[0]) / (bodyRho * V), ext[0], ext[1], ext[2], coupling->maskedSource()[0], um[0], um[1] - body.x[0], um[2] - body.x[1], um[3] - body.x[2], body.prescribed ? "" : "  free");
       if (nrs->lastStep) {
         printf("launch: injected %.4e m3 of %.4e (main carry %.2f, satellite carry %.2f deferred)\n", injectedVolume, sapVolume, carryMain, carrySat);
       }
