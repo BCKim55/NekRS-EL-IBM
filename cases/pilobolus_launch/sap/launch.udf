@@ -52,7 +52,7 @@ static int hemisphere = 0; // 1: sporangium as a solid hemisphere, dome forward,
 static double hemisphereRadius = 0; // > 0: its radius; 0: the radius of the same volume as the sphere of `diameter`
 static double restitution = 0.9, sigma = 0.072, contactAngleDeg = 0, bridgeVolumeFraction = 0.1;
 static int bridgeEl = 0, bridgeIbm = 0, cohesionModel = 0;
-static double ruptureGap = 0, cohesionFactor = 1, tangentialDamping = 0;
+static double ruptureGap = 0, cohesionFactor = 1, tangentialDamping = 0, cohesionStrength = 0, cohesionRange = 0;
 static int freeFlight, reportInterval;
 static std::string trajectoryFile;
 static std::vector<double> trajT, trajV, trajX; // measured profile (SI)
@@ -166,6 +166,8 @@ void UDF_Setup0(MPI_Comm comm, setupAide &options)
   get("rupture_gap", ruptureGap);
   get("cohesion_factor", cohesionFactor);
   get("tangential_damping", tangentialDamping);
+  get("cohesion_strength", cohesionStrength);
+  get("cohesion_range", cohesionRange);
 
   if (!trajectoryFile.empty()) {
     std::ifstream f(trajectoryFile);
@@ -218,6 +220,8 @@ void UDF_Setup()
   cfg.ruptureGap = ruptureGap;
   cfg.cohesionFactor = cohesionFactor;
   cfg.tangentialDamping = tangentialDamping;
+  cfg.cohesionStrength = cohesionStrength;
+  cfg.cohesionRange = cohesionRange;
   // EL-EL search radius: contact of the main drops, plus the bridge reach
   cfg.neighborWidth = dMain + (bridgeEl ? cfg.bridgeRupture(dMain) : 0);
   coupling = new elibm::Coupling(nrs, cfg);
@@ -246,7 +250,13 @@ void UDF_Setup()
       printf("launch: hemisphere R %.3e (width %.3e, mass %.3e kg vs sphere %.3e)\n", body.radius, 2 * body.radius,
              bodyRho * body.volume(), bodyRho * M_PI / 6 * diameter * diameter * diameter);
     }
-    if ((bridgeEl || bridgeIbm) && cohesionModel == 1) {
+    if ((bridgeEl || bridgeIbm) && cohesionModel == 2) {
+      const double H = cohesionRange > 0 ? cohesionRange : dMain / elibm::Config::pfZeroCrossing;
+      printf("launch: pairwise-force cohesion EL %d IBM %d  s %.3e N/m (%.3f sigma)  H %.3e (%.2f d_main, reach %.2f d_main)"
+             "  F_max pair %.3e N  monolayer edge tension %.3e (2 sigma %.3e)  tangential damping %.2f\n",
+             bridgeEl, bridgeIbm, cohesionStrength, cohesionStrength / sigma, H, H / dMain, cfg.bridgeRupture(dMain) / dMain,
+             0.836 * cohesionStrength * H, 46.7 * cohesionStrength, 2 * sigma, tangentialDamping);
+    } else if ((bridgeEl || bridgeIbm) && cohesionModel == 1) {
       const double r = 0.5 * dMain;
       printf("launch: liquid-parcel cohesion EL %d IBM %d  sigma %.3e  factor %.2f  rupture gap %.3e (%.2f d_main)"
              "  F EL-EL %.3e N  EL-IBM %.3e N  tangential damping %.2f  (main drop weight %.3e N)\n",

@@ -17,6 +17,11 @@
 !               the liquid, so neighbours pull with the capillary
 !               tension of a thread of their size, cohfac sigma pi d/2,
 !               flat up to half the rupture gap srup, then fading to 0.
+!               icoh = 2 pairwise-force SPH bond (Tartakovsky & Meakin
+!               2005; quartic profile of Whebell et al. 2024):
+!               F = s H f(r/H), f = 1 + a t^2 - 2(2+a) t^3 + (3+a) t^4,
+!               a = -23.5, attractive for t > t0 = 0.275 (zero crossing
+!               = contact when H = (ri+rj)/t0), zero at H; s in N/m.
 !-----------------------------------------------------------------------
       subroutine ppiclc_elibm_SetFluid(rmu,rhof,grav,dtf)
      > bind(C, name="ppiclc_elibm_SetFluid")
@@ -68,13 +73,16 @@
       elibm_srup        = 0.0d0
       elibm_cohfac      = 1.0d0
       elibm_etat        = 0.0d0
+      elibm_cohs        = 0.0d0
+      elibm_cohh        = 0.0d0
 
       return
       end
 !-----------------------------------------------------------------------
       subroutine ppiclc_elibm_SetBridge(sigma,theta,vbfrac,
      >                                  ibridge_el,ibridge_ibm,
-     >                                  icoh,srup,cohfac,etat)
+     >                                  icoh,srup,cohfac,etat,
+     >                                  cohs,cohh)
      > bind(C, name="ppiclc_elibm_SetBridge")
 !
 ! Capillary attraction between EL particles (ibridge_el = 1) and between
@@ -83,6 +91,8 @@
 ! volume vbfrac times the volume of the smaller sphere.
 ! icoh = 1: liquid parcel, tension cohfac sigma pi d_eff/2 up to the
 ! rupture gap srup (absolute, m).
+! icoh = 2: pairwise-force SPH bond, amplitude cohs (N/m), range cohh
+! (m; <= 0: (ri + rj)/t0 so the zero crossing sits at contact).
 ! etat: tangential dashpot in overlap as a fraction of the normal one
 ! (0: frictionless). Call after SetContact.
 !
@@ -91,7 +101,7 @@
       include "PPICLF"
       include "ELIBM.inc"
 !
-      real*8 sigma, theta, vbfrac, srup, cohfac, etat
+      real*8 sigma, theta, vbfrac, srup, cohfac, etat, cohs, cohh
       integer*4 ibridge_el, ibridge_ibm, icoh
 !
       elibm_sigma       = sigma
@@ -103,6 +113,8 @@
       elibm_srup        = srup
       elibm_cohfac      = cohfac
       elibm_etat        = etat
+      elibm_cohs        = cohs
+      elibm_cohh        = cohh
 
       return
       end
@@ -285,7 +297,12 @@
 !   gap (1 + theta/2) V^(1/3) (Lian et al. 1993);
 !  icoh = 1, liquid parcel: F = cohfac sigma pi d_eff/2 (the tension of
 !   a liquid thread of diameter d_eff = 2R, or 2 ri against a body) for
-!   S < srup/2, falling linearly to 0 at the rupture gap srup.
+!   S < srup/2, falling linearly to 0 at the rupture gap srup;
+!  icoh = 2, pairwise-force SPH bond (Whebell et al. 2024 profile):
+!   F = cohs H f(t), t = (ri + rj + S)/H, f = 1 + a t^2 - 2(2+a) t^3
+!   + (3+a) t^4, a = -23.5, only its attractive part t0 < t < 1 (the
+!   spring is the repulsive core); H = cohh, or (ri + rj)/t0 so the
+!   bond starts at contact. Against a body rj is replaced by ri.
 ! No pair history: the bond exists whenever the gap is below rupture.
 ! ib = 0: j is another sphere of radius rj; ib > 0: j is body ib (xj its
 ! centre of mass), and the gap and normal follow its shape through
@@ -301,8 +318,10 @@
       integer*4 ib, ibr
 !
       real*8 d(3), gsurf, delta, rn(3), vn, rmeff, eta, rpi2, rle,
-     >       rpi, vb, srup, reff, sh, fcap, s, vt(3)
+     >       rpi, vb, srup, reff, sh, fcap, s, vt(3), h, t, fq, rsum
       integer*4 k
+      real*8 aq, t0
+      parameter (aq = -23.5d0, t0 = 0.27496630476818784d0)
 !
       do k=1,3
          f(k)   = 0.0d0
@@ -335,11 +354,25 @@
                fcap = 2.0d0*rpi*elibm_sigma*reff*cos(elibm_theta)
      >               /(1.0d0 + 1.05d0*sh + 2.5d0*sh**2)
             endif
-         else
+         else if (elibm_icoh .eq. 1) then
             srup = elibm_srup
             if (s .lt. srup) then
                fcap = elibm_cohfac*elibm_sigma*rpi*reff
      >               *min(1.0d0, 2.0d0*(1.0d0 - s/srup))
+            endif
+         else
+            if (ib .eq. 0) then
+               rsum = ri + rj
+            else
+               rsum = 2.0d0*ri
+            endif
+            h = elibm_cohh
+            if (h .le. 0.0d0) h = rsum/t0
+            t = (rsum + s)/h
+            if (t .gt. t0 .and. t .lt. 1.0d0) then
+               fq   = 1.0d0 + aq*t*t - 2.0d0*(2.0d0 + aq)*t**3
+     >              + (3.0d0 + aq)*t**4
+               fcap = -elibm_cohs*h*fq
             endif
          endif
       endif

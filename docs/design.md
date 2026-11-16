@@ -1555,3 +1555,42 @@ the Video S3 metrics of 7.13 (rim radius, lag, break-up). The theoretical
 basis and the calibration tests (thread tension σπd/2, Rayleigh–Plateau
 break-up time, Taylor–Culick rim speed) are collected in 7.15 once the
 literature survey is in.
+
+### 7.15 Theoretical basis: pairwise-force cohesion (`cohesion_model = 2`, `scripts/pf_cohesion_calibration.py`)
+
+The survey in `docs/notes/liquid_parcel_literature.md` gives the models
+that make pairwise-interacting particles behave as a liquid with a
+prescribed surface tension: pairwise-force SPH (Tartakovsky & Meakin 2005;
+Tartakovsky & Panchenko 2016 with the analytic σ integral; Whebell et al.
+2024 with a resolution-independent quartic profile and the Laplace
+calibration σ = 30.96 s), the Akinci 2013 cohesion + curvature + neighbour
+deficiency scheme, the MPS potential force (Kondo 2007), many-body DPD
+(Warren 2003; Arienti 2011 for threads), and the wet collision/wall rules
+of spray codes (O'Rourke 1981, Ashgriz & Poo 1990, Mundo 1995, Bai &
+Gosman 1995). The capillary-bridge DEM family (Willett 2000, Lian 1993,
+Rabinovich 2005) is explicitly valid for V/R³ < 0.1 between solid grains
+and is the wrong tool once the parcels are the liquid (7.14).
+
+`cohesion_model = 2` implements the PF-SPH bond in the Whebell form inside
+`elibm_ContactForce`: F = s H f(r/H), f(τ) = 1 + ατ² − 2(2+α)τ³ + (3+α)τ⁴,
+α = −23.5, with r the centre distance (2 r_p + gap against a body), s
+(`cohesion_strength`, N/m) and H (`cohesion_range`; 0 → H = d/0.275 so the
+zero crossing sits at contact, reach 2.64 d beyond it). Only the attractive
+branch is used; the spring-dashpot stays the repulsive core, and the wet
+contact of 7.14 (`tangential_damping`, e 0.05) is kept. The search width
+becomes d + 2.64 d = 91 µm for 25 µm parcels.
+
+Calibration by static lattice sums (`scripts/pf_cohesion_calibration.py`,
+d = 1, per unit s): max pair pull 3.04 s d; single-file chain tension at
+contact 9.82 s d (π d σ/2 needs s = 0.160 σ); hex monolayer edge tension
+46.7 s (2σ needs s = 0.043 σ); Whebell's 3D bulk σ = 31 s (s = 0.032 σ).
+Sheet and bulk agree within 30 %, the single-file thread needs 4× more:
+that spread is what Akinci's K_ij = 2ρ₀/(ρ_i + ρ_j) corrects, and it is the
+next refinement if one s cannot serve both the thread and the disc.
+`cases/pilobolus_launch/sap_jet_tuo_free0_hemi_pf` runs the free0_hemi
+configuration with s = 0.04 σ = 2.9e-3 N/m (max pair pull 0.22 µN, parcel
+acceleration 2.7e4 m/s²). Dynamic calibration tests still to run (any
+machine, ppiclF-only or small nekRS box): Laplace pressure of a parcel
+blob, Rayleigh–Plateau break-up time of a perturbed cylinder
+(0.343⁻¹ √(ρR³/σ) ≈ 79 µs at R 37.5 µm), monolayer retraction against
+Taylor–Culick √(2σ/ρh_eff).

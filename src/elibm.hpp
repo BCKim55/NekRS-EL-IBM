@@ -42,7 +42,7 @@ extern "C" {
 void ppiclc_elibm_SetFluid(double *mu, double *rho, double *grav, double *dt);
 void ppiclc_elibm_SetContact(double *kn, double *restitution, int *ifnb, int *iattach, int *iplanar);
 void ppiclc_elibm_SetBridge(double *sigma, double *theta, double *vbfrac, int *ibridgeEl, int *ibridgeIbm, int *icoh,
-                            double *srup, double *cohfac, double *etat);
+                            double *srup, double *cohfac, double *etat, double *cohs, double *cohh);
 void ppiclc_elibm_SetBodies(int *nb,
                             double *x,
                             double *v,
@@ -140,8 +140,16 @@ struct Config {
   // cohesionModel 1 replaces the pendular bridge by a liquid-parcel bond (the
   // parcels are the liquid): tension cohesionFactor sigma pi d_eff/2, flat to
   // half the rupture gap and fading to 0 at ruptureGap (absolute, m).
+  // cohesionModel 2 is the pairwise-force SPH bond (Tartakovsky & Meakin 2005,
+  // quartic profile of Whebell et al. 2024): F = s H f(r/H), attractive part
+  // only, amplitude cohesionStrength s in N/m, range cohesionRange H (0: the
+  // zero crossing (r = 0.275 H) sits at contact, H = 3.64 d). Static lattice
+  // sums (scripts/pf_cohesion_calibration.py): a hex monolayer at contact has
+  // edge tension 46.7 s, a 3D bulk sigma = 31 s (Whebell), a single-file
+  // chain pi d sigma/2 at s = 0.16 sigma; sheets want s ~ 0.03-0.04 sigma.
   int cohesionModel = 0;
-  double ruptureGap = 0, cohesionFactor = 1;
+  double ruptureGap = 0, cohesionFactor = 1, cohesionStrength = 0, cohesionRange = 0;
+  static constexpr double pfZeroCrossing = 0.27496630476818784;
   // wet contact: tangential dashpot on the slip velocity in overlap, as a
   // fraction of the normal dashpot (0: frictionless)
   double tangentialDamping = 0;
@@ -149,6 +157,9 @@ struct Config {
   {
     if (cohesionModel == 1) {
       return ruptureGap;
+    }
+    if (cohesionModel == 2) {
+      return (cohesionRange > 0 ? cohesionRange : dp / pfZeroCrossing) - dp;
     }
     return (1 + 0.5 * contactAngle) * std::cbrt(bridgeVolumeFraction * M_PI / 6 * dp * dp * dp);
   }
@@ -407,10 +418,14 @@ public:
       if (cfg.cohesionModel == 1 && cfg.ruptureGap <= 0) {
         throw std::runtime_error("elibm: cohesionModel 1 needs ruptureGap > 0");
       }
+      if (cfg.cohesionModel == 2 && cfg.cohesionStrength <= 0) {
+        throw std::runtime_error("elibm: cohesionModel 2 needs cohesionStrength > 0");
+      }
       double sigma = cfg.sigma, theta = cfg.contactAngle, vb = cfg.bridgeVolumeFraction;
       double srup = cfg.ruptureGap, cohfac = cfg.cohesionFactor, etat = cfg.tangentialDamping;
+      double cohs = cfg.cohesionStrength, cohh = cfg.cohesionRange;
       int iel = cfg.bridgeEl ? 1 : 0, iibm = cfg.bridgeIbm ? 1 : 0, icoh = cfg.cohesionModel;
-      ppiclc_elibm_SetBridge(&sigma, &theta, &vb, &iel, &iibm, &icoh, &srup, &cohfac, &etat);
+      ppiclc_elibm_SetBridge(&sigma, &theta, &vb, &iel, &iibm, &icoh, &srup, &cohfac, &etat, &cohs, &cohh);
     }
     pushBodies();
     ppiclc_elibm_PlaceMarkers();
