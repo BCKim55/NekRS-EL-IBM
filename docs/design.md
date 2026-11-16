@@ -1517,3 +1517,41 @@ than a jet from a nozzle at rest; a 1–7 µm film cannot be a cloud of 25 µm
 parcels, so parcels of ~5 µm (or a sheet surrogate) are needed to carry
 its area; and the comparison metrics are the rim radius r(t), the
 sheet–sporangium lag Δx(t) and the break-up time, not the picture.
+
+### 7.14 Wet liquid-parcel model (`cohesion_model = 1`, `cases/pilobolus_launch/sap_jet_tuo_free0_hemi_wet`)
+
+The runs of 7.11–7.12 bracket two extremes: with the pendular bridge the
+sap is a short-ranged granular chain (rupture at 9 µm), without it a
+bouncing granular gas. Both are grain models. The Willett bridge describes
+a little liquid between two *solid* grains; here the parcels *are* the
+liquid, whose cohesion is the surface tension of the thread or film they
+form. `cohesion_model = 1` keeps the same pairwise machinery (ppiclF
+neighbour list, `elibm_ContactForce`, body gap through `elibm_SurfaceGap`)
+with a liquid bond instead:
+
+* bond force `cohesion_factor` σ π d_eff / 2 — the capillary tension of a
+  liquid thread of diameter d_eff = 2 r_i r_j/(r_i + r_j) (d_p against a
+  body) — flat up to half the rupture gap and falling linearly to zero at
+  `rupture_gap` (absolute; here one parcel diameter, 25 µm, against
+  Willett's 9 µm). No pair history, as before.
+* wet contact: the spring-dashpot keeps e = 0.05, and `tangential_damping`
+  (fraction of the normal dashpot) damps the slip velocity in overlap, so
+  parcels landing on the face or on each other neither bounce nor slide
+  freely.
+* `bridge_el`/`bridge_ibm` and `sigma` keep their meaning; the Willett
+  path (`cohesion_model = 0`, default) is untouched and the other cases are
+  unaffected.
+
+Magnitudes for 25 µm parcels: bond 2.8 µN (Willett at contact: 5.65 µN,
+but gone at 9 µm), parcel mass 8.2 ng, bond acceleration 3.4e5 m/s²;
+spring equilibrium sink under the bond 14 nm. The search width becomes
+d_main + rupture_gap = 50 µm.
+
+The test case is the jet-launched hemisphere of 7.12 (`free0_hemi`) at
+dt 5e-7 (CFL ≤ 0.4 for the 17.5 m/s sap thread) with the wet model. What
+to compare with the bridge and no-bridge twins: launch speed, F_c on the
+face, whether the sap holds a disc on the face and a thread behind it, and
+the Video S3 metrics of 7.13 (rim radius, lag, break-up). The theoretical
+basis and the calibration tests (thread tension σπd/2, Rayleigh–Plateau
+break-up time, Taylor–Culick rim speed) are collected in 7.15 once the
+literature survey is in.

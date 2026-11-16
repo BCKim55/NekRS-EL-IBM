@@ -41,7 +41,8 @@
 extern "C" {
 void ppiclc_elibm_SetFluid(double *mu, double *rho, double *grav, double *dt);
 void ppiclc_elibm_SetContact(double *kn, double *restitution, int *ifnb, int *iattach, int *iplanar);
-void ppiclc_elibm_SetBridge(double *sigma, double *theta, double *vbfrac, int *ibridgeEl, int *ibridgeIbm);
+void ppiclc_elibm_SetBridge(double *sigma, double *theta, double *vbfrac, int *ibridgeEl, int *ibridgeIbm, int *icoh,
+                            double *srup, double *cohfac, double *etat);
 void ppiclc_elibm_SetBodies(int *nb,
                             double *x,
                             double *v,
@@ -136,8 +137,19 @@ struct Config {
   // (1 + theta/2) V^(1/3). Exclusive with attachOnContact on the body side.
   bool bridgeEl = false, bridgeIbm = false;
   double sigma = 0, contactAngle = 0, bridgeVolumeFraction = 0.1;
-  double bridgeRupture(double dp) const // rupture gap of a bridge between spheres of diameter dp
+  // cohesionModel 1 replaces the pendular bridge by a liquid-parcel bond (the
+  // parcels are the liquid): tension cohesionFactor sigma pi d_eff/2, flat to
+  // half the rupture gap and fading to 0 at ruptureGap (absolute, m).
+  int cohesionModel = 0;
+  double ruptureGap = 0, cohesionFactor = 1;
+  // wet contact: tangential dashpot on the slip velocity in overlap, as a
+  // fraction of the normal dashpot (0: frictionless)
+  double tangentialDamping = 0;
+  double bridgeRupture(double dp) const // rupture gap of a bond between spheres of diameter dp
   {
+    if (cohesionModel == 1) {
+      return ruptureGap;
+    }
     return (1 + 0.5 * contactAngle) * std::cbrt(bridgeVolumeFraction * M_PI / 6 * dp * dp * dp);
   }
   int substeps = 1;
@@ -392,9 +404,13 @@ public:
       if (cfg.bridgeEl && !ifnb) {
         throw std::runtime_error("elibm: bridgeEl needs neighborWidth >= dp + bridgeRupture(dp)");
       }
+      if (cfg.cohesionModel == 1 && cfg.ruptureGap <= 0) {
+        throw std::runtime_error("elibm: cohesionModel 1 needs ruptureGap > 0");
+      }
       double sigma = cfg.sigma, theta = cfg.contactAngle, vb = cfg.bridgeVolumeFraction;
-      int iel = cfg.bridgeEl ? 1 : 0, iibm = cfg.bridgeIbm ? 1 : 0;
-      ppiclc_elibm_SetBridge(&sigma, &theta, &vb, &iel, &iibm);
+      double srup = cfg.ruptureGap, cohfac = cfg.cohesionFactor, etat = cfg.tangentialDamping;
+      int iel = cfg.bridgeEl ? 1 : 0, iibm = cfg.bridgeIbm ? 1 : 0, icoh = cfg.cohesionModel;
+      ppiclc_elibm_SetBridge(&sigma, &theta, &vb, &iel, &iibm, &icoh, &srup, &cohfac, &etat);
     }
     pushBodies();
     ppiclc_elibm_PlaceMarkers();

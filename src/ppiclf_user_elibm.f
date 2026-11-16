@@ -11,6 +11,12 @@
 !               in C++ (src/elibm.hpp).
 ! Contact     : linear spring-dashpot, normal only; the dashpot gives
 !               restitution coefficient e for an isolated binary hit.
+!               A wet contact (etat > 0) also damps the tangential slip.
+! Cohesion    : icoh = 0 pendular Willett bridge (grains wetted by a
+!               little liquid); icoh = 1 liquid parcel: the parcels ARE
+!               the liquid, so neighbours pull with the capillary
+!               tension of a thread of their size, cohfac sigma pi d/2,
+!               flat up to half the rupture gap srup, then fading to 0.
 !-----------------------------------------------------------------------
       subroutine ppiclc_elibm_SetFluid(rmu,rhof,grav,dtf)
      > bind(C, name="ppiclc_elibm_SetFluid")
@@ -58,33 +64,45 @@
       elibm_vbfrac     = 0.0d0
       elibm_ibridge_el  = 0
       elibm_ibridge_ibm = 0
+      elibm_icoh        = 0
+      elibm_srup        = 0.0d0
+      elibm_cohfac      = 1.0d0
+      elibm_etat        = 0.0d0
 
       return
       end
 !-----------------------------------------------------------------------
       subroutine ppiclc_elibm_SetBridge(sigma,theta,vbfrac,
-     >                                  ibridge_el,ibridge_ibm)
+     >                                  ibridge_el,ibridge_ibm,
+     >                                  icoh,srup,cohfac,etat)
      > bind(C, name="ppiclc_elibm_SetBridge")
 !
-! Pendular liquid bridge (capillary) force between EL particles
-! (ibridge_el = 1) and between EL particles and IBM bodies
-! (ibridge_ibm = 1): surface tension sigma, contact angle theta (rad),
-! bridge volume vbfrac times the volume of the smaller sphere.
-! Call after SetContact.
+! Capillary attraction between EL particles (ibridge_el = 1) and between
+! EL particles and IBM bodies (ibridge_ibm = 1), surface tension sigma.
+! icoh = 0: pendular Willett bridge, contact angle theta (rad), bridge
+! volume vbfrac times the volume of the smaller sphere.
+! icoh = 1: liquid parcel, tension cohfac sigma pi d_eff/2 up to the
+! rupture gap srup (absolute, m).
+! etat: tangential dashpot in overlap as a fraction of the normal one
+! (0: frictionless). Call after SetContact.
 !
       implicit none
 !
       include "PPICLF"
       include "ELIBM.inc"
 !
-      real*8 sigma, theta, vbfrac
-      integer*4 ibridge_el, ibridge_ibm
+      real*8 sigma, theta, vbfrac, srup, cohfac, etat
+      integer*4 ibridge_el, ibridge_ibm, icoh
 !
       elibm_sigma       = sigma
       elibm_theta       = theta
       elibm_vbfrac      = vbfrac
       elibm_ibridge_el  = ibridge_el
       elibm_ibridge_ibm = ibridge_ibm
+      elibm_icoh        = icoh
+      elibm_srup        = srup
+      elibm_cohfac      = cohfac
+      elibm_etat        = etat
 
       return
       end
@@ -256,14 +274,19 @@
       subroutine elibm_ContactForce(xi,vi,ri,rmi,xj,vj,rj,rmj,ib,
      >                              ibr,f,fbr)
 !
-! Normal force f on sphere i (centre xi, radius ri) from j: spring-dashpot
-! in overlap, plus with ibr = 1 the pendular liquid-bridge attraction
-! (Willett et al. 2000), which is also returned on its own in fbr
+! Force f on sphere i (centre xi, radius ri) from j: spring-dashpot in
+! overlap (normal, plus a tangential dashpot etat x the normal one on
+! the slip velocity when etat > 0), plus with ibr = 1 the capillary
+! attraction, also returned on its own in fbr:
+!  icoh = 0, pendular bridge (Willett et al. 2000)
 !   F = 2 pi sigma R cos(theta) / (1 + 1.05 S^ + 2.5 S^2),
 !   S^ = S/2 sqrt(R/V), R = 2 ri rj/(ri + rj), S = gap (0 in overlap),
-! V = vbfrac x the smaller sphere's volume, acting up to the rupture
-! gap (1 + theta/2) V^(1/3) (Lian et al. 1993). No pair history: the
-! bridge exists whenever the gap is below the rupture distance.
+!   V = vbfrac x the smaller sphere's volume, acting up to the rupture
+!   gap (1 + theta/2) V^(1/3) (Lian et al. 1993);
+!  icoh = 1, liquid parcel: F = cohfac sigma pi d_eff/2 (the tension of
+!   a liquid thread of diameter d_eff = 2R, or 2 ri against a body) for
+!   S < srup/2, falling linearly to 0 at the rupture gap srup.
+! No pair history: the bond exists whenever the gap is below rupture.
 ! ib = 0: j is another sphere of radius rj; ib > 0: j is body ib (xj its
 ! centre of mass), and the gap and normal follow its shape through
 ! elibm_SurfaceGap.
@@ -278,7 +301,7 @@
       integer*4 ib, ibr
 !
       real*8 d(3), gsurf, delta, rn(3), vn, rmeff, eta, rpi2, rle,
-     >       rpi, vb, srup, reff, sh, fcap
+     >       rpi, vb, srup, reff, sh, fcap, s, vt(3)
       integer*4 k
 !
       do k=1,3
@@ -297,13 +320,27 @@
       rpi  = 3.141592653589793d0
       fcap = 0.0d0
       if (ibr .eq. 1) then
-         vb   = elibm_vbfrac*4.0d0/3.0d0*rpi*min(ri,rj)**3
-         srup = (1.0d0 + 0.5d0*elibm_theta)*vb**(1.0d0/3.0d0)
-         if (-delta .lt. srup) then
+         s = max(-delta,0.0d0)
+         if (ib .eq. 0) then
             reff = 2.0d0*ri*rj/(ri + rj)
-            sh   = 0.5d0*max(-delta,0.0d0)*sqrt(reff/vb)
-            fcap = 2.0d0*rpi*elibm_sigma*reff*cos(elibm_theta)
-     >            /(1.0d0 + 1.05d0*sh + 2.5d0*sh**2)
+         else
+            reff = ri
+         endif
+         if (elibm_icoh .eq. 0) then
+            vb   = elibm_vbfrac*4.0d0/3.0d0*rpi*min(ri,rj)**3
+            srup = (1.0d0 + 0.5d0*elibm_theta)*vb**(1.0d0/3.0d0)
+            if (s .lt. srup) then
+               reff = 2.0d0*ri*rj/(ri + rj)
+               sh   = 0.5d0*s*sqrt(reff/vb)
+               fcap = 2.0d0*rpi*elibm_sigma*reff*cos(elibm_theta)
+     >               /(1.0d0 + 1.05d0*sh + 2.5d0*sh**2)
+            endif
+         else
+            srup = elibm_srup
+            if (s .lt. srup) then
+               fcap = elibm_cohfac*elibm_sigma*rpi*reff
+     >               *min(1.0d0, 2.0d0*(1.0d0 - s/srup))
+            endif
          endif
       endif
       if (delta .le. 0.0d0 .and. fcap .eq. 0.0d0) return
@@ -331,6 +368,12 @@
       do k=1,3
          f(k) = f(k) + (elibm_kn*delta - eta*vn)*rn(k)
       enddo
+      if (elibm_etat .gt. 0.0d0) then
+         do k=1,3
+            vt(k) = vi(k) - vj(k) - vn*rn(k)
+            f(k)  = f(k) - elibm_etat*eta*vt(k)
+         enddo
+      endif
 
       return
       end
